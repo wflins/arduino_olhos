@@ -101,6 +101,15 @@ bool aindaHaInvasores() {
   return false;
 }
 
+void iniciarExplosao() {
+  if (!explosaoJogador) {
+    explosaoJogador = true;
+    inicioExplosao = millis();
+    tiroAtivo = false;
+    tiroInimigoAtivo = false;
+  }
+}
+
 void dispararJogador() {
   if (!tiroAtivo && !explosaoJogador) {
     tiroX = jogadorX;
@@ -154,6 +163,7 @@ void atualizarJogo() {
       jogadorX = 64;
       reiniciarInvasores();
     }
+    return;
   }
 
   if (agora - ultimoPassoInvader >= 320) {
@@ -168,11 +178,9 @@ void atualizarJogo() {
     }
   }
 
-  if (!explosaoJogador) {
-    jogadorX += direcaoJogador * 2;
-    if (jogadorX >= SCREEN_WIDTH - 8 || jogadorX <= 8) {
-      direcaoJogador *= -1;
-    }
+  jogadorX += direcaoJogador * 2;
+  if (jogadorX >= SCREEN_WIDTH - 8 || jogadorX <= 8) {
+    direcaoJogador *= -1;
   }
 
   if (agora - ultimoTiro >= 650) {
@@ -196,9 +204,7 @@ void atualizarJogo() {
 
     if (tiroInimigoY >= PLAYER_Y - 4 &&
         abs(tiroInimigoX - jogadorX) <= 6) {
-      tiroInimigoAtivo = false;
-      explosaoJogador = true;
-      inicioExplosao = agora;
+      iniciarExplosao();
     }
 
     if (tiroInimigoY >= SCREEN_HEIGHT) {
@@ -211,8 +217,7 @@ void atualizarJogo() {
   }
 
   if (grupoY > 38) {
-    explosaoJogador = true;
-    inicioExplosao = agora;
+    iniciarExplosao();
   }
 }
 
