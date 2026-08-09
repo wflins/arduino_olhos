@@ -34,7 +34,7 @@ enum EfeitoRobo {
   EFEITO_TIMIDO,
   EFEITO_CONFUSO,
   EFEITO_ASSUSTADO,
-  EFEITO_EMP0LGADO
+  EFEITO_EMPOLGADO
 };
 
 EfeitoRobo efeitoAtual = EFEITO_NENHUM;
@@ -230,7 +230,7 @@ void iniciarEfeito(EfeitoRobo efeito) {
       Serial.println(F("Estado: assustado"));
       break;
 
-    case EFEITO_EMP0LGADO:
+    case EFEITO_EMPOLGADO:
       roboEyes.setMood(HAPPY);
       roboEyes.setVFlicker(ON, 2);
       duracaoEfeito = random(2200UL, 4001UL);
@@ -293,7 +293,7 @@ void escolherEfeitoAleatorio() {
     iniciarEfeito(EFEITO_ASSUSTADO);      // 2%
   }
   else {
-    iniciarEfeito(EFEITO_EMP0LGADO);      // 2%
+    iniciarEfeito(EFEITO_EMPOLGADO);      // 2%
   }
 }
 
