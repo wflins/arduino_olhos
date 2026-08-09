@@ -13,7 +13,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 int heroiX = -10;
 bool passo = false;
-bool cipóFase = false;
+bool cipoFase = false;
 unsigned long ultimoFrame = 0;
 unsigned long ultimoPasso = 0;
 
@@ -48,8 +48,8 @@ void desenharJungle() {
   display.drawLine(33, SOLO_Y - 6, 41, SOLO_Y - 2, SSD1306_WHITE);
   display.drawLine(33, SOLO_Y - 2, 41, SOLO_Y - 6, SSD1306_WHITE);
 
-  // Cipó balancando sobre o buraco.
-  int pontaX = cipóFase ? 83 : 96;
+  // Cipo balancando sobre o buraco.
+  int pontaX = cipoFase ? 83 : 96;
   display.drawLine(90, 0, pontaX, 31, SSD1306_WHITE);
   display.fillCircle(pontaX, 31, 2, SSD1306_WHITE);
 
@@ -97,7 +97,7 @@ void atualizarAnimacao() {
   if (agora - ultimoPasso >= 120) {
     ultimoPasso = agora;
     passo = !passo;
-    cipóFase = !cipóFase;
+    cipoFase = !cipoFase;
   }
 
   if (agora - ultimoFrame < FRAME_INTERVAL) return;
