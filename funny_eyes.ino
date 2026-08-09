@@ -24,6 +24,7 @@ enum EstadoOlhos {
   ESTADO_CURIOSO,
   ESTADO_SURPRESO,
   ESTADO_SONOLENTO,
+  ESTADO_DORMINDO,
   ESTADO_PISCADINHA,
   ESTADO_TONTO,
   ESTADO_GLITCH,
@@ -134,6 +135,23 @@ void desenharOlhoFechado(int cx, int cy, int largura) {
   display.drawLine(cx, cy + 4, cx + largura, cy + 1, SSD1306_WHITE);
 }
 
+void desenharOlhoDormindo(int cx, int cy) {
+  // Linha fechada mais longa e relaxada do que uma piscada normal.
+  display.drawLine(cx - 11, cy, cx - 4, cy + 2, SSD1306_WHITE);
+  display.drawFastHLine(cx - 4, cy + 2, 8, SSD1306_WHITE);
+  display.drawLine(cx + 4, cy + 2, cx + 11, cy, SSD1306_WHITE);
+
+  display.drawLine(cx - 10, cy + 1, cx - 4, cy + 3, SSD1306_WHITE);
+  display.drawFastHLine(cx - 4, cy + 3, 8, SSD1306_WHITE);
+  display.drawLine(cx + 4, cy + 3, cx + 10, cy + 1, SSD1306_WHITE);
+}
+
+void desenharZ(int x, int y, int tamanho) {
+  display.drawFastHLine(x, y, tamanho, SSD1306_WHITE);
+  display.drawLine(x + tamanho - 1, y, x, y + tamanho, SSD1306_WHITE);
+  display.drawFastHLine(x, y + tamanho, tamanho, SSD1306_WHITE);
+}
+
 void desenharOlhoFeliz(int cx, int cy) {
   display.drawLine(cx - 10, cy + 3, cx - 4, cy - 2, SSD1306_WHITE);
   display.drawLine(cx - 4, cy - 2, cx + 4, cy - 2, SSD1306_WHITE);
@@ -209,6 +227,29 @@ void desenharSonolento() {
 
   display.fillCircle(OLHO_ESQ_X + olharX, y + 1, 2, SSD1306_BLACK);
   display.fillCircle(OLHO_DIR_X + olharX, y + 1, 2, SSD1306_BLACK);
+}
+
+void desenharDormindo() {
+  // Movimento lento de 1 pixel simula a respiracao durante o sono.
+  int y = OLHO_Y + 4 + bounceY;
+
+  desenharOlhoDormindo(OLHO_ESQ_X, y);
+  desenharOlhoDormindo(OLHO_DIR_X, y);
+
+  // O ronco cresce: nada -> Z -> ZZ -> ZZZ -> repete.
+  byte etapaZ = fase % 4;
+
+  if (etapaZ >= 1) {
+    desenharZ(103, 27, 5);
+  }
+
+  if (etapaZ >= 2) {
+    desenharZ(111, 17, 6);
+  }
+
+  if (etapaZ >= 3) {
+    desenharZ(119, 6, 7);
+  }
 }
 
 void desenharPiscadinha() {
@@ -310,6 +351,7 @@ void desenharEstadoAtual() {
     case ESTADO_CURIOSO: desenharCurioso(); break;
     case ESTADO_SURPRESO: desenharSurpreso(); break;
     case ESTADO_SONOLENTO: desenharSonolento(); break;
+    case ESTADO_DORMINDO: desenharDormindo(); break;
     case ESTADO_PISCADINHA: desenharPiscadinha(); break;
     case ESTADO_TONTO: desenharTonto(); break;
     case ESTADO_GLITCH: desenharGlitch(); break;
@@ -342,7 +384,8 @@ void voltarAoNormal() {
 }
 
 void escolherEstadoAleatorio() {
-  byte escolha = random(1, 13);
+  // random() exclui o limite superior. 1..13 inclui todos os estados especiais.
+  byte escolha = random(1, 14);
 
   estadoAtual = (EstadoOlhos)escolha;
   estadoEspecialAtivo = true;
@@ -377,6 +420,13 @@ void escolherEstadoAleatorio() {
       alvoOlharX = random(-2, 3);
       alvoOlharY = 2;
       duracaoEstado = random(3000UL, 5201UL);
+      break;
+
+    case ESTADO_DORMINDO:
+      centralizarOlhar();
+      bounceY = 1;
+      direcaoBounce = -1;
+      duracaoEstado = random(5500UL, 9001UL);
       break;
 
     case ESTADO_PISCADINHA:
@@ -493,6 +543,11 @@ void atualizarMovimentos() {
   }
   else if (estadoAtual == ESTADO_SONOLENTO) {
     intervalo = 500;
+  }
+  else if (estadoAtual == ESTADO_DORMINDO) {
+    // Ritmo lento para simular respiracao durante o sono.
+    intervalo = 650;
+    limite = 1;
   }
   else if (estadoAtual == ESTADO_GLITCH ||
            estadoAtual == ESTADO_ROBO ||
