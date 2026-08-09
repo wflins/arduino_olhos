@@ -11,10 +11,23 @@
 #define FRAME_INTERVAL 45
 #define VELOCIDADE 2
 
+// Quantidade de vagoes do trem.
+// Altere apenas este valor para aumentar ou diminuir o trem.
+#define NUM_VAGOES 4
+
+#define LARGURA_VAGAO 30
+#define ESPACO_VAGOES 5
+#define PASSO_VAGAO (LARGURA_VAGAO + ESPACO_VAGOES)
+#define COMPRIMENTO_LOCOMOTIVA 56
+#define COMPRIMENTO_TREM (COMPRIMENTO_LOCOMOTIVA + (NUM_VAGOES * PASSO_VAGAO))
+
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-int tremX = -72;
+// Quando vai para a direita, tremX representa a traseira do ultimo vagao.
+// Quando vai para a esquerda, tremX representa a locomotiva.
+int tremX = -COMPRIMENTO_TREM;
 int direcao = 1; // 1 = direita, -1 = esquerda
+
 byte faseRoda = 0;
 byte faseFumaca = 0;
 
@@ -165,7 +178,8 @@ void desenharLocomotiva(int x, int y, int dir) {
     display.fillRect(x + 41, y - 24, 5, 11, SSD1306_WHITE);
     display.drawLine(x + 44, y - 15, x + 50, y - 8, SSD1306_WHITE);
     display.drawLine(x + 50, y - 8, x + 44, y - 8, SSD1306_WHITE);
-  } else {
+  }
+  else {
     display.fillRect(x, y - 24, 5, 11, SSD1306_WHITE);
     display.drawLine(x + 2, y - 15, x - 6, y - 8, SSD1306_WHITE);
     display.drawLine(x - 6, y - 8, x + 1, y - 8, SSD1306_WHITE);
@@ -197,20 +211,30 @@ void desenharLocomotiva(int x, int y, int dir) {
   desenharBiela(roda1X, roda3X, rodaY, faseRoda);
 
   // Engate traseiro.
-  display.drawFastHLine(traseira + (dir > 0 ? -5 : 1), y - 9, 6, SSD1306_WHITE);
+  display.drawFastHLine(
+    traseira + (dir > 0 ? -5 : 1),
+    y - 9,
+    6,
+    SSD1306_WHITE
+  );
 }
 
 // ------------------------------------------------------
 // VAGAO
 // ------------------------------------------------------
 
-void desenharVagao(int x, int y, int dir) {
-  display.drawRect(x, y - 25, 30, 20, SSD1306_WHITE);
-  display.drawFastHLine(x - 2, y - 26, 34, SSD1306_WHITE);
+void desenharVagao(int x, int y, int dir, int numero) {
+  display.drawRect(x, y - 25, LARGURA_VAGAO, 20, SSD1306_WHITE);
+  display.drawFastHLine(x - 2, y - 26, LARGURA_VAGAO + 4, SSD1306_WHITE);
 
   // Ripas laterais.
-  for (int i = 5; i < 30; i += 8) {
+  for (int i = 5; i < LARGURA_VAGAO; i += 8) {
     display.drawFastVLine(x + i, y - 23, 16, SSD1306_WHITE);
+  }
+
+  // Pequena marca para diferenciar os vagoes.
+  if (numero % 2 == 0) {
+    display.drawFastHLine(x + 5, y - 16, 20, SSD1306_WHITE);
   }
 
   // Rodas pequenas.
@@ -219,9 +243,10 @@ void desenharVagao(int x, int y, int dir) {
 
   // Engates.
   if (dir > 0) {
-    display.drawFastHLine(x + 29, y - 10, 8, SSD1306_WHITE);
-  } else {
-    display.drawFastHLine(x - 7, y - 10, 8, SSD1306_WHITE);
+    display.drawFastHLine(x + LARGURA_VAGAO - 1, y - 10, ESPACO_VAGOES + 3, SSD1306_WHITE);
+  }
+  else {
+    display.drawFastHLine(x - ESPACO_VAGOES - 2, y - 10, ESPACO_VAGOES + 3, SSD1306_WHITE);
   }
 }
 
@@ -231,17 +256,26 @@ void desenharVagao(int x, int y, int dir) {
 
 void desenharTrem() {
   int locoX;
-  int vagaoX;
 
   if (direcao > 0) {
-    vagaoX = tremX;
-    locoX = tremX + 34;
-  } else {
+    // Vagoes ficam atras e a locomotiva na frente.
+    for (int i = 0; i < NUM_VAGOES; i++) {
+      int vagaoX = tremX + (i * PASSO_VAGAO);
+      desenharVagao(vagaoX, TRILHO_Y, direcao, i);
+    }
+
+    locoX = tremX + (NUM_VAGOES * PASSO_VAGAO);
+  }
+  else {
+    // Indo para a esquerda, a locomotiva fica na frente e os vagoes atras.
     locoX = tremX;
-    vagaoX = tremX + 50;
+
+    for (int i = 0; i < NUM_VAGOES; i++) {
+      int vagaoX = tremX + COMPRIMENTO_LOCOMOTIVA + (i * PASSO_VAGAO);
+      desenharVagao(vagaoX, TRILHO_Y, direcao, i);
+    }
   }
 
-  desenharVagao(vagaoX, TRILHO_Y, direcao);
   desenharLocomotiva(locoX, TRILHO_Y, direcao);
 }
 
@@ -266,14 +300,14 @@ void atualizarAnimacao() {
 
   tremX += direcao * VELOCIDADE;
 
-  // Quando o trem sai da tela, volta pelo lado oposto.
+  // So muda de sentido depois que o trem inteiro saiu da tela.
   if (direcao > 0 && tremX > SCREEN_WIDTH + 20) {
     direcao = -1;
-    tremX = SCREEN_WIDTH + 72;
+    tremX = SCREEN_WIDTH + 20;
   }
-  else if (direcao < 0 && tremX < -90) {
+  else if (direcao < 0 && tremX < -(COMPRIMENTO_TREM + 20)) {
     direcao = 1;
-    tremX = -72;
+    tremX = -COMPRIMENTO_TREM;
   }
 
   display.clearDisplay();
@@ -300,7 +334,9 @@ void setup() {
   display.clearDisplay();
   display.display();
 
-  Serial.println(F("Locomotiva iniciada"));
+  Serial.print(F("Locomotiva iniciada com "));
+  Serial.print(NUM_VAGOES);
+  Serial.println(F(" vagoes"));
 }
 
 // ------------------------------------------------------
