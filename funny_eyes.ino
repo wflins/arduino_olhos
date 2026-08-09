@@ -12,6 +12,9 @@
 #define OLHO_DIR_X 88
 #define OLHO_Y 32
 
+// Cantos menores deixam os olhos mais retos/cartoon e menos ovais.
+#define RAIO_CANTO_OLHO 4
+
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 enum EstadoOlhos {
@@ -95,14 +98,12 @@ void iniciarPiscada() {
 
 void desenharOlhoAberto(int cx, int cy, int largura, int altura,
                         int dx, int dy, bool brilhoExtra) {
-  int raio = largura / 2;
-
   display.fillRoundRect(
     cx - largura / 2,
     cy - altura / 2,
     largura,
     altura,
-    raio,
+    RAIO_CANTO_OLHO,
     SSD1306_WHITE
   );
 
@@ -200,8 +201,8 @@ void desenharSurpreso() {
 void desenharSonolento() {
   int y = OLHO_Y + 3;
 
-  display.fillRoundRect(OLHO_ESQ_X - 10, y - 4, 20, 9, 4, SSD1306_WHITE);
-  display.fillRoundRect(OLHO_DIR_X - 10, y - 4, 20, 9, 4, SSD1306_WHITE);
+  display.fillRoundRect(OLHO_ESQ_X - 10, y - 4, 20, 9, 3, SSD1306_WHITE);
+  display.fillRoundRect(OLHO_DIR_X - 10, y - 4, 20, 9, 3, SSD1306_WHITE);
 
   display.drawLine(OLHO_ESQ_X - 11, y - 7, OLHO_ESQ_X + 11, y - 3, SSD1306_WHITE);
   display.drawLine(OLHO_DIR_X - 11, y - 7, OLHO_DIR_X + 11, y - 3, SSD1306_WHITE);
@@ -219,8 +220,8 @@ void desenharPiscadinha() {
 void desenharTonto() {
   int y = OLHO_Y + bounceY;
 
-  display.fillRoundRect(OLHO_ESQ_X - 11, y - 14, 22, 28, 10, SSD1306_WHITE);
-  display.fillRoundRect(OLHO_DIR_X - 11, y - 14, 22, 28, 10, SSD1306_WHITE);
+  display.fillRoundRect(OLHO_ESQ_X - 11, y - 14, 22, 28, 4, SSD1306_WHITE);
+  display.fillRoundRect(OLHO_DIR_X - 11, y - 14, 22, 28, 4, SSD1306_WHITE);
 
   int desloca = (fase % 3) - 1;
   desenharXPupila(OLHO_ESQ_X + desloca, y);
@@ -260,8 +261,8 @@ void desenharDesconfiado() {
 void desenharApaixonado() {
   int y = OLHO_Y + bounceY;
 
-  display.fillRoundRect(OLHO_ESQ_X - 12, y - 15, 24, 30, 11, SSD1306_WHITE);
-  display.fillRoundRect(OLHO_DIR_X - 12, y - 15, 24, 30, 11, SSD1306_WHITE);
+  display.fillRoundRect(OLHO_ESQ_X - 12, y - 15, 24, 30, 4, SSD1306_WHITE);
+  display.fillRoundRect(OLHO_DIR_X - 12, y - 15, 24, 30, 4, SSD1306_WHITE);
 
   desenharCoracaoPreto(OLHO_ESQ_X, y);
   desenharCoracaoPreto(OLHO_DIR_X, y);
@@ -276,8 +277,8 @@ void desenharPanico() {
   int tremor = (fase % 3) - 1;
   int y = OLHO_Y + tremor;
 
-  display.fillRoundRect(OLHO_ESQ_X - 14, y - 18, 28, 36, 13, SSD1306_WHITE);
-  display.fillRoundRect(OLHO_DIR_X - 14, y - 18, 28, 36, 13, SSD1306_WHITE);
+  display.fillRoundRect(OLHO_ESQ_X - 14, y - 18, 28, 36, 5, SSD1306_WHITE);
+  display.fillRoundRect(OLHO_DIR_X - 14, y - 18, 28, 36, 5, SSD1306_WHITE);
 
   display.fillCircle(OLHO_ESQ_X + ((fase % 2) ? 3 : -3), y + 1, 3, SSD1306_BLACK);
   display.fillCircle(OLHO_DIR_X + ((fase % 2) ? -3 : 3), y + 1, 3, SSD1306_BLACK);
@@ -289,8 +290,8 @@ void desenharPanico() {
 void desenharRobo() {
   int scan = (fase % 9) - 4;
 
-  display.drawRoundRect(OLHO_ESQ_X - 14, OLHO_Y - 10, 28, 20, 4, SSD1306_WHITE);
-  display.drawRoundRect(OLHO_DIR_X - 14, OLHO_Y - 10, 28, 20, 4, SSD1306_WHITE);
+  display.drawRoundRect(OLHO_ESQ_X - 14, OLHO_Y - 10, 28, 20, 3, SSD1306_WHITE);
+  display.drawRoundRect(OLHO_DIR_X - 14, OLHO_Y - 10, 28, 20, 3, SSD1306_WHITE);
 
   display.fillRect(OLHO_ESQ_X + scan - 2, OLHO_Y - 6, 5, 12, SSD1306_WHITE);
   display.fillRect(OLHO_DIR_X + scan - 2, OLHO_Y - 6, 5, 12, SSD1306_WHITE);
@@ -493,17 +494,21 @@ void atualizarMovimentos() {
   else if (estadoAtual == ESTADO_SONOLENTO) {
     intervalo = 500;
   }
-  else if (estadoAtual == ESTADO_GLITCH || estadoAtual == ESTADO_ROBO || estadoAtual == ESTADO_TONTO) {
+  else if (estadoAtual == ESTADO_GLITCH ||
+           estadoAtual == ESTADO_ROBO ||
+           estadoAtual == ESTADO_TONTO) {
     intervalo = 100;
   }
 
   if (agora - ultimoMovimento < intervalo) return;
+
   ultimoMovimento = agora;
   fase++;
 
   if (estadoAtual != ESTADO_GLITCH &&
       estadoAtual != ESTADO_ROBO &&
       estadoAtual != ESTADO_TONTO) {
+
     bounceY += direcaoBounce;
 
     if (bounceY <= -limite || bounceY >= limite) {
@@ -520,6 +525,7 @@ void setup() {
     for (;;) {}
   }
 
+  // A0 fica livre no Nano. SDA = A4 e SCL = A5.
   randomSeed((unsigned long)analogRead(A0) ^ micros());
 
   display.clearDisplay();
