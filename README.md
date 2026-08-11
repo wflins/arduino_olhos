@@ -2,7 +2,7 @@
 
 Projeto para exibir olhos e pequenas animacoes em um display OLED SSD1306 128x64 via I2C.
 
-O repositorio possui versoes para Arduino Nano/Uno e tambem sketches especificos para ESP32-CAM.
+O repositorio possui versoes para Arduino Nano/Uno, ESP32-CAM e ESP32 WROOM-32/DevKit.
 
 ## Bibliotecas
 
@@ -95,7 +95,7 @@ SCL  ------------> GPIO14
 
 O ESP32 trabalha com logica de 3.3V e seus GPIOs nao devem receber sinais de 5V.
 
-Alguns modulos OLED possuem resistores de pull-up de SDA e SCL ligados ao proprio VCC. Alimentar o OLED com 3.3V garante que o barramento I2C tambem permaneça em 3.3V.
+Alguns modulos OLED possuem resistores de pull-up de SDA e SCL ligados ao proprio VCC. Alimentar o OLED com 3.3V garante que o barramento I2C tambem permanecera em 3.3V.
 
 Por isso, para o ESP32-CAM, a configuracao recomendada neste projeto e:
 
@@ -114,6 +114,45 @@ Se futuramente o projeto utilizar o microSD em modo SD_MMC, esses pinos podem en
 #define OLED_SDA 13
 #define OLED_SCL 14
 ```
+
+---
+
+# Ligacao no ESP32 WROOM-32 / DevKit
+
+A versao `funny_eyes_esp32_wroom.ino` foi preparada para placas de desenvolvimento ESP32 WROOM-32, inclusive modelos com conversor USB-Serial CH9102X.
+
+O sketch usa o barramento I2C nos pinos:
+
+```cpp
+#define OLED_SDA 21
+#define OLED_SCL 22
+```
+
+## Ligacoes do OLED
+
+| SSD1306 | ESP32 WROOM-32 |
+|---|---|
+| VCC | 3.3V |
+| GND | GND |
+| SDA | GPIO21 |
+| SCL | GPIO22 |
+
+Representacao simplificada:
+
+```text
+OLED SSD1306        ESP32 WROOM-32
+-------------       ---------------
+VCC  ------------> 3V3
+GND  ------------> GND
+SDA  ------------> GPIO21
+SCL  ------------> GPIO22
+```
+
+A alimentacao mais simples para uma placa DevKit com CH9102X e pelo proprio conector USB. A placa recebe a alimentacao USB e o regulador interno fornece 3.3V ao ESP32.
+
+Para o OLED deste projeto, prefira o pino **3V3**, mantendo os sinais I2C em nivel logico de 3.3V.
+
+> Nao aplique 5V diretamente no pino `3V3` do ESP32.
 
 ---
 
@@ -207,6 +246,17 @@ Fonte +5V -> ESP32-CAM 5V
 Fonte GND -> ESP32-CAM GND
 ```
 
+## ESP32 WROOM-32 / DevKit
+
+```text
+OLED VCC -> 3V3
+OLED GND -> GND
+OLED SDA -> GPIO21
+OLED SCL -> GPIO22
+
+Alimentacao da placa -> USB
+```
+
 ---
 
 ## Funcionamento
@@ -216,6 +266,7 @@ Os sketches utilizam diferentes estilos de animacao para o SSD1306, incluindo:
 - piscadas automaticas;
 - movimento aleatorio dos olhos;
 - diferentes expressoes;
+- animacao dormindo com Zzz;
 - animacoes retro;
 - atualizacao continua sem `delay()` para manter a animacao fluida.
 
@@ -224,3 +275,7 @@ O sketch inicial e `arduino_olhos.ino`.
 A versao dos olhos inspirados no Pikachu para Arduino e `pikachu_eyes.ino`.
 
 A versao especifica para ESP32-CAM e `pikachu_eyes_esp32.ino`.
+
+A versao Funny Eyes para Arduino Nano/Uno e `funny_eyes.ino`.
+
+A versao Funny Eyes para ESP32 WROOM-32/DevKit e `funny_eyes_esp32_wroom.ino`.
