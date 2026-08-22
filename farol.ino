@@ -7,6 +7,11 @@
 #define OLED_RESET -1
 #define OLED_ADDRESS 0x3C
 
+// ESP32 WROOM-32 / DevKit
+#define OLED_SDA 21
+#define OLED_SCL 22
+#define OLED_I2C_FREQ 400000
+
 #define MAR_Y 48
 #define FAROL_X 96
 #define LUZ_X 95
@@ -188,17 +193,32 @@ void atualizarAnimacao() {
 }
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
 
-  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS)) {
+  // I2C padrao do ESP32 WROOM-32 / DevKit: SDA 21 / SCL 22.
+  Wire.begin(OLED_SDA, OLED_SCL, OLED_I2C_FREQ);
+
+  // Wire ja foi iniciado acima; periphBegin=false evita reinicializar o barramento.
+  if (!display.begin(
+        SSD1306_SWITCHCAPVCC,
+        OLED_ADDRESS,
+        true,
+        false
+      )) {
     Serial.println(F("SSD1306 nao encontrado"));
-    for (;;) {}
+    for (;;) {
+      delay(1000);
+    }
   }
 
   display.clearDisplay();
   display.display();
 
-  Serial.println(F("Farol iniciado"));
+  Serial.println(F("Farol ESP32 WROOM-32 iniciado"));
+  Serial.print(F("OLED SDA GPIO"));
+  Serial.print(OLED_SDA);
+  Serial.print(F(" / SCL GPIO"));
+  Serial.println(OLED_SCL);
 }
 
 void loop() {
