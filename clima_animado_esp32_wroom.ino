@@ -54,8 +54,19 @@ void desenharWifi(int x, int y) {
     display.drawLine(x + 8, y, x, y + 8, SSD1306_WHITE);
     return;
   }
-  display.drawCircle(x + 4, y + 7, 1, SSD1306_WHITE);
-  display.drawArc(x + 4, y + 7, 3, 3, 200, 340, SSD1306_WHITE);
+
+  // Icone Wi-Fi usando apenas primitivas suportadas pelo Adafruit_GFX.
+  display.fillCircle(x + 4, y + 8, 1, SSD1306_WHITE);
+
+  // Arco interno aproximado por duas linhas.
+  display.drawLine(x + 1, y + 6, x + 4, y + 4, SSD1306_WHITE);
+  display.drawLine(x + 4, y + 4, x + 7, y + 6, SSD1306_WHITE);
+
+  // Arco externo aproximado por quatro linhas.
+  display.drawLine(x, y + 4, x + 2, y + 2, SSD1306_WHITE);
+  display.drawLine(x + 2, y + 2, x + 4, y + 1, SSD1306_WHITE);
+  display.drawLine(x + 4, y + 1, x + 6, y + 2, SSD1306_WHITE);
+  display.drawLine(x + 6, y + 2, x + 8, y + 4, SSD1306_WHITE);
 }
 
 void desenharSol(int cx, int cy) {
