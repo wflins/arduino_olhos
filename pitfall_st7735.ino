@@ -8,228 +8,290 @@
 
 Adafruit_ST7735 tft(TFT_CS, TFT_DC, TFT_RST);
 
+// Pitfall ST7735 - visual inspirado de perto no Pitfall! do Atari 2600.
+// Prioridade: proporcoes, paleta, HUD, sprites pixelados e fluidez.
+
 const uint16_t FRAME_MS = 33; // ~30 FPS
-const int GAME_Y = 0;
-const int GAME_H = 128;
-GFXcanvas16 fb(160, GAME_H);
+GFXcanvas16 fb(160, 128);
 
 uint32_t frameNo = 0;
 unsigned long lastFrame = 0;
 unsigned long sceneStart = 0;
 
-uint16_t C_DARKGREEN, C_LIGHTGREEN, C_YELLOW, C_BROWN, C_DARKBROWN;
-uint16_t C_SKIN, C_SHIRT, C_PANTS, C_WATER, C_GOLD;
+uint16_t C_SKY, C_CANOPY, C_FIELD, C_TRUNK, C_GROUND, C_GROUND2;
+uint16_t C_SKIN, C_SHIRT, C_PANTS, C_SCORPION, C_CROC, C_GOLD;
 
-enum SceneType : uint8_t { VINE=0, LOG=1, CROCS=2, SCORPION=3, CAVE=4 };
-SceneType scene = VINE;
+enum SceneType : uint8_t {
+  SCENE_VINE = 0,
+  SCENE_LOG = 1,
+  SCENE_CROCS = 2,
+  SCENE_SCORPION = 3,
+  SCENE_UNDERGROUND = 4
+};
 
-int heroX = 34;
-const int groundY = 91;
-int obstacleX = 178;
+SceneType scene = SCENE_VINE;
+int movingX = 182;
+
+const int PLAY_TOP = 6;
+const int CANOPY_BOTTOM = 46;
+const int GROUND_Y = 88;
+const int LOWER_BLACK_Y = 108;
+
+void putPixelBlock(int x,int y,int w,int h,uint16_t c){
+  fb.fillRect(x,y,w,h,c);
+}
 
 void drawHud(){
   fb.setTextWrap(false);
   fb.setTextColor(ST77XX_WHITE);
   fb.setTextSize(2);
-  fb.setCursor(50, 5);
+  fb.setCursor(50,7);
   fb.print("1761");
-  fb.setCursor(28, 24);
+  fb.setCursor(25,24);
   fb.print("II 19:07");
 }
 
-void drawForestBase(){
-  fb.fillScreen(C_DARKGREEN);
-  fb.fillRect(0, 43, 160, 45, C_LIGHTGREEN);
+void drawCanopy(){
+  // fundo verde escuro superior
+  fb.fillRect(0,0,160,CANOPY_BOTTOM,C_SKY);
 
-  // Copas arredondadas e troncos, lembrando o visual do Atari.
-  int scroll = (frameNo * 2) % 42;
-  for(int x=-30; x<210; x+=42){
-    int xx=x-scroll;
-    fb.fillCircle(xx+12, 48, 15, C_LIGHTGREEN);
-    fb.fillCircle(xx+27, 49, 13, C_LIGHTGREEN);
-    fb.fillRect(xx+20, 49, 5, 39, C_BROWN);
+  // borda irregular inferior da copa, usando blocos grandes estilo Atari
+  const int y = 42;
+  for(int x=0;x<160;x+=8){
+    int step=((x/8)*7 + 3) % 5;
+    int yy=y + step - 2;
+    fb.fillRect(x,yy,8,CANOPY_BOTTOM-yy,C_CANOPY);
   }
 
-  // Faixa amarela de solo e base marrom.
-  fb.fillRect(0, 88, 160, 10, C_YELLOW);
-  fb.fillRect(0, 98, 160, 10, C_DARKBROWN);
+  // massa verde clara inferior
+  fb.fillRect(0,CANOPY_BOTTOM,160,GROUND_Y-CANOPY_BOTTOM,C_FIELD);
 }
 
-void drawBottomBand(){
-  fb.fillRect(0, 109, 160, 19, ST77XX_BLACK);
-  fb.fillRect(5, 118, 150, 3, C_YELLOW);
+void drawTrunks(){
+  // troncos finos e espaçados, como no original
+  const int xs[] = {24, 68, 107, 145};
+  for(uint8_t i=0;i<4;i++){
+    fb.fillRect(xs[i],CANOPY_BOTTOM-1,4,GROUND_Y-(CANOPY_BOTTOM-1),C_TRUNK);
+  }
+}
+
+void drawGround(){
+  fb.fillRect(0,GROUND_Y,160,10,C_GROUND);
+  fb.fillRect(0,GROUND_Y+10,160,10,C_GROUND2);
+}
+
+void drawLowerBand(){
+  fb.fillRect(0,LOWER_BLACK_Y,160,20,ST77XX_BLACK);
+  fb.fillRect(4,118,152,3,C_GROUND2);
+
+  // contador/icone inferior simplificado
   fb.setTextSize(1);
   fb.setTextColor(ST77XX_WHITE);
-  fb.setCursor(44, 111);
+  fb.setCursor(52,110);
+  fb.print("x9");
+
+  fb.setCursor(48,122);
   fb.print("ACTIVISION");
 }
 
-void drawHarry(int x, int baseY, int jump, bool swing=false){
-  int y = baseY - jump;
-  bool gait = ((frameNo/3)&1)==0;
+void drawForestScreen(){
+  fb.fillScreen(ST77XX_BLACK);
+  drawCanopy();
+  drawTrunks();
+  drawGround();
+  drawHud();
+}
 
-  fb.fillCircle(x, y-14, 3, C_SKIN);
-  fb.drawFastHLine(x-2, y-17, 5, ST77XX_BLACK);
-  fb.fillRect(x-2, y-10, 5, 7, C_SHIRT);
+void drawHarryPixel(int x,int feetY,bool swing,bool frameAlt){
+  // sprite propositalmente pequeno e blocado, inspirado no original
+  int y=feetY;
+
+  // cabeca
+  putPixelBlock(x, y-15, 3, 3, C_SKIN);
+  putPixelBlock(x+2, y-16, 2, 2, ST77XX_BLACK);
+
+  // camiseta rosada / pele
+  putPixelBlock(x-1, y-12, 4, 5, C_SHIRT);
+  putPixelBlock(x+3, y-11, 2, 2, C_SKIN);
+
+  // calca verde
+  putPixelBlock(x, y-7, 4, 4, C_PANTS);
 
   if(swing){
-    fb.drawLine(x-1,y-8,x+6,y-17,C_SKIN);
-    fb.drawLine(x+2,y-8,x+8,y-16,C_SKIN);
-    fb.drawLine(x,y-3,x-5,y+4,C_PANTS);
-    fb.drawLine(x+1,y-3,x+5,y+3,C_PANTS);
-    return;
-  }
-
-  if(gait){
-    fb.drawLine(x-1,y-8,x-6,y-4,C_SKIN);
-    fb.drawLine(x+2,y-8,x+6,y-12,C_SKIN);
-    fb.drawLine(x,y-3,x-5,y+4,C_PANTS);
-    fb.drawLine(x+1,y-3,x+6,y+2,C_PANTS);
-  } else {
-    fb.drawLine(x-1,y-8,x-5,y-12,C_SKIN);
-    fb.drawLine(x+2,y-8,x+7,y-4,C_SKIN);
-    fb.drawLine(x,y-3,x-2,y+3,C_PANTS);
-    fb.drawLine(x+1,y-3,x+7,y+4,C_PANTS);
+    fb.drawLine(x+1,y-10,x+6,y-16,C_SKIN);
+    fb.drawLine(x+2,y-3,x-3,y+1,C_PANTS);
+    fb.drawLine(x+3,y-3,x+8,y,C_PANTS);
+  }else if(frameAlt){
+    fb.drawLine(x,y-3,x-5,y+2,C_PANTS);
+    fb.drawLine(x+3,y-3,x+7,y+1,C_PANTS);
+    fb.drawLine(x,y-10,x-5,y-7,C_SKIN);
+  }else{
+    fb.drawLine(x,y-3,x-2,y+2,C_PANTS);
+    fb.drawLine(x+3,y-3,x+8,y+2,C_PANTS);
+    fb.drawLine(x+3,y-10,x+8,y-7,C_SKIN);
   }
 }
 
-void drawPit(int x, int w){
-  fb.fillRect(x, 88, w, 10, ST77XX_BLACK);
-  fb.fillTriangle(x-5,88,x,88,x,98,C_DARKBROWN);
-  fb.fillTriangle(x+w,88,x+w+5,88,x+w,98,C_DARKBROWN);
+void drawPit(int x,int w){
+  fb.fillRect(x,GROUND_Y+2,w,6,ST77XX_BLACK);
+  fb.fillRect(x+7,GROUND_Y,w-14,8,ST77XX_BLACK);
+  fb.fillRect(x+15,GROUND_Y-2,w-30,3,ST77XX_BLACK);
 }
 
-void drawVine(){
-  int topX=92;
-  int swing = (int)((frameNo % 120) - 60);
-  int endX = topX + swing/3;
-  int endY = 67 + abs(swing)/8;
-  fb.drawLine(topX, 38, endX, endY, ST77XX_BLACK);
+void drawVineScene(){
+  drawForestScreen();
+  drawPit(54,58);
 
-  drawPit(58, 54);
+  // cipó preso no alto, com balanço bem visível
+  int phase=(frameNo%120);
+  int dx;
+  if(phase<60) dx=-24 + (phase*48)/60;
+  else dx=24 - ((phase-60)*48)/60;
 
-  if(frameNo%120 < 88){
-    drawHarry(endX, endY+16, 0, true);
-  } else {
-    drawHarry(126, groundY, 0, false);
-  }
+  int endX=82+dx;
+  int endY=66 + (abs(dx)*10)/24;
+  fb.drawLine(82,45,endX,endY,ST77XX_BLACK);
+
+  bool alt=((frameNo/4)&1);
+  drawHarryPixel(endX-2,endY+15,true,alt);
+
+  // escorpiao parado no lado direito, como na referencia
+  drawScorpionAt(131,90);
 }
 
-void drawRollingLog(){
-  int x = obstacleX;
-  fb.fillRoundRect(x, 82, 27, 7, 3, C_BROWN);
-  fb.drawCircle(x+5,85,3,C_DARKBROWN);
-  fb.drawCircle(x+21,85,3,C_DARKBROWN);
+void drawRollingLogScene(){
+  drawForestScreen();
 
+  // tronco rolando no solo
+  int x=movingX;
+  fb.fillRect(x,82,28,6,C_TRUNK);
+  fb.fillRect(x+4,80,20,2,C_TRUNK);
+  fb.drawRect(x+2,82,5,5,C_GROUND2);
+  fb.drawRect(x+21,82,5,5,C_GROUND2);
+
+  int heroX=34;
   int dist=x-heroX;
   int jump=0;
-  if(dist>-14 && dist<48){
-    int t=48-dist;
-    jump=(int)(sin((t*PI)/62.0f)*18.0f);
-    if(jump<0) jump=0;
+  if(dist<54 && dist>-18){
+    int t=54-dist;
+    // parabola inteira 0..72, evita float
+    jump=(t*(72-t))/72;
+    if(jump>18) jump=18;
   }
-  drawHarry(heroX, groundY, jump, false);
+  drawHarryPixel(heroX,GROUND_Y-jump,false,((frameNo/3)&1));
 }
 
-void drawCrocs(){
-  drawPit(47, 70);
-  uint16_t g=tft.color565(45,125,35);
-  for(int i=0;i<3;i++){
-    int x=57+i*22;
-    bool open=((frameNo/9+i)&1)==0;
-    fb.fillRect(x,90,15,4,g);
-    fb.fillTriangle(x+15,90,x+21,92,x+15,94,g);
-    if(open){
-      fb.drawLine(x+10,89,x+16,86,g);
-      fb.drawLine(x+10,95,x+16,98,g);
-    }
-    fb.drawPixel(x+4,89,ST77XX_WHITE);
+void drawCrocAt(int x,bool open){
+  // crocodilo estilo 2600: corpo horizontal e focinho pixelado
+  fb.fillRect(x,91,15,3,C_CROC);
+  fb.fillRect(x+3,88,8,3,C_CROC);
+  fb.drawPixel(x+5,87,ST77XX_WHITE);
+  if(open){
+    fb.drawLine(x+12,90,x+18,87,C_CROC);
+    fb.drawLine(x+12,94,x+18,97,C_CROC);
+  }else{
+    fb.drawFastHLine(x+11,92,8,C_CROC);
   }
+}
 
-  int phase=frameNo%130;
+void drawCrocsScene(){
+  drawForestScreen();
+  drawPit(47,70);
+  for(int i=0;i<3;i++) drawCrocAt(55+i*22,((frameNo/8+i)&1)==0);
+
+  int phase=frameNo%150;
+  int hx=27;
   int jump=0;
-  int hx=heroX;
-  if(phase>35 && phase<100){
-    hx=35+(phase-35)*2;
-    int p=phase-35;
-    jump=(int)(sin((p*PI)/65.0f)*22.0f);
+  if(phase>30 && phase<115){
+    int t=phase-30;
+    hx=27+(t*105)/85;
+    jump=(t*(85-t))/95;
+    if(jump>22) jump=22;
   }
-  drawHarry(hx, groundY, jump, false);
+  drawHarryPixel(hx,GROUND_Y-jump,false,((frameNo/3)&1));
 }
 
-void drawScorpion(){
-  int sx=obstacleX;
-  uint16_t sc=tft.color565(235,235,225);
-  fb.fillCircle(sx,87,4,sc);
-  fb.fillCircle(sx+5,86,3,sc);
-  fb.drawLine(sx+7,84,sx+10,80,sc);
-  fb.drawLine(sx+10,80,sx+8,77,sc);
-  fb.drawLine(sx-3,90,sx-8,93,sc);
-  fb.drawLine(sx+2,90,sx+7,93,sc);
+void drawScorpionAt(int x,int y){
+  // mais proximo do pequeno escorpiao branco do original
+  fb.fillRect(x,y-3,6,3,C_SCORPION);
+  fb.fillRect(x+5,y-5,3,2,C_SCORPION);
+  fb.drawLine(x+7,y-5,x+10,y-9,C_SCORPION);
+  fb.drawLine(x+10,y-9,x+8,y-12,C_SCORPION);
+  fb.drawLine(x-1,y,x-4,y+2,C_SCORPION);
+  fb.drawLine(x+2,y,x+5,y+2,C_SCORPION);
+}
 
-  int dist=sx-heroX;
+void drawScorpionScene(){
+  drawForestScreen();
+  drawScorpionAt(movingX,91);
+
+  int heroX=35;
+  int dist=movingX-heroX;
   int jump=0;
-  if(dist>-10 && dist<44){
-    int t=44-dist;
-    jump=(int)(sin((t*PI)/54.0f)*16.0f);
-    if(jump<0) jump=0;
+  if(dist<45 && dist>-12){
+    int t=45-dist;
+    jump=(t*(57-t))/85;
+    if(jump>15) jump=15;
   }
-  drawHarry(heroX, groundY, jump, false);
+  drawHarryPixel(heroX,GROUND_Y-jump,false,((frameNo/3)&1));
 }
 
-void drawCave(){
+void drawUndergroundScene(){
   fb.fillScreen(ST77XX_BLACK);
-  fb.fillRect(0, 20, 160, 18, C_DARKBROWN);
-  fb.fillRect(0, 91, 160, 17, C_BROWN);
 
-  for(int x=0;x<160;x+=24){
-    fb.fillTriangle(x,38,x+8,38,x+4,50,C_DARKBROWN);
+  // topo continua com HUD verde, como as transicoes subterraneas do jogo
+  fb.fillRect(0,0,160,31,C_SKY);
+  drawHud();
+
+  // corredor subterraneo em tons terrosos
+  fb.fillRect(0,34,160,14,C_GROUND2);
+  fb.fillRect(0,88,160,15,C_TRUNK);
+
+  // colunas/tijolos pixelados
+  for(int x=8;x<160;x+=30){
+    fb.fillRect(x,48,4,40,C_DARKBROWN());
   }
 
-  int scroll=(frameNo*2)%55;
-  for(int x=-30;x<210;x+=55){
+  // tesouros rolando para a esquerda
+  int scroll=(frameNo*2)%70;
+  for(int x=-20;x<200;x+=70){
     int xx=x-scroll;
-    fb.fillRect(xx,76,10,15,C_DARKBROWN);
-    fb.fillRect(xx+2,72,6,5,C_GOLD);
+    fb.fillRect(xx,78,10,8,C_GOLD);
+    fb.drawRect(xx+2,76,6,2,ST77XX_WHITE);
   }
 
-  drawHarry(heroX, 91, 0, false);
+  drawHarryPixel(36,87,false,((frameNo/3)&1));
 }
+
+uint16_t C_DARKBROWN(){ return tft.color565(92,48,6); }
 
 void updateScene(){
   unsigned long now=millis();
-  if(now-sceneStart >= 8500UL){
+  if(now-sceneStart>=9000UL){
     scene=(SceneType)(((uint8_t)scene+1)%5);
     sceneStart=now;
-    obstacleX=178;
+    movingX=182;
   }
 }
 
-void updateObjects(){
-  if(scene==LOG || scene==SCORPION){
-    obstacleX-=3;
-    if(obstacleX<-35) obstacleX=178;
+void updateMovingObjects(){
+  if(scene==SCENE_LOG || scene==SCENE_SCORPION){
+    movingX-=3;
+    if(movingX<-35) movingX=182;
   }
 }
 
 void renderFrame(){
-  if(scene==CAVE){
-    drawCave();
-  } else {
-    drawForestBase();
-    drawHud();
-
-    switch(scene){
-      case VINE: drawVine(); break;
-      case LOG: drawRollingLog(); break;
-      case CROCS: drawCrocs(); break;
-      case SCORPION: drawScorpion(); break;
-      default: break;
-    }
+  switch(scene){
+    case SCENE_VINE: drawVineScene(); break;
+    case SCENE_LOG: drawRollingLogScene(); break;
+    case SCENE_CROCS: drawCrocsScene(); break;
+    case SCENE_SCORPION: drawScorpionScene(); break;
+    case SCENE_UNDERGROUND: drawUndergroundScene(); break;
   }
 
-  drawBottomBand();
-  tft.drawRGBBitmap(0, GAME_Y, fb.getBuffer(), 160, GAME_H);
+  drawLowerBand();
+  tft.drawRGBBitmap(0,0,fb.getBuffer(),160,128);
 }
 
 void setup(){
@@ -238,16 +300,18 @@ void setup(){
   tft.setRotation(1);
   tft.fillScreen(ST77XX_BLACK);
 
-  C_DARKGREEN=tft.color565(0,95,15);
-  C_LIGHTGREEN=tft.color565(105,230,15);
-  C_YELLOW=tft.color565(255,225,65);
-  C_BROWN=tft.color565(115,55,12);
-  C_DARKBROWN=tft.color565(145,110,0);
-  C_SKIN=tft.color565(245,180,120);
-  C_SHIRT=tft.color565(245,95,180);
-  C_PANTS=tft.color565(20,90,50);
-  C_WATER=tft.color565(35,105,180);
-  C_GOLD=tft.color565(255,195,20);
+  C_SKY=tft.color565(0,95,12);
+  C_CANOPY=tft.color565(0,112,12);
+  C_FIELD=tft.color565(105,226,12);
+  C_TRUNK=tft.color565(102,48,5);
+  C_GROUND=tft.color565(255,224,50);
+  C_GROUND2=tft.color565(154,118,0);
+  C_SKIN=tft.color565(247,177,125);
+  C_SHIRT=tft.color565(246,92,175);
+  C_PANTS=tft.color565(20,88,45);
+  C_SCORPION=tft.color565(235,235,225);
+  C_CROC=tft.color565(45,116,35);
+  C_GOLD=tft.color565(255,194,20);
 
   lastFrame=sceneStart=millis();
 }
@@ -255,10 +319,11 @@ void setup(){
 void loop(){
   unsigned long now=millis();
   updateScene();
+
   if(now-lastFrame>=FRAME_MS){
     lastFrame=now;
     frameNo++;
-    updateObjects();
+    updateMovingObjects();
     renderFrame();
   }
   yield();
