@@ -8,12 +8,13 @@
 
 Adafruit_ST7735 tft(TFT_CS, TFT_DC, TFT_RST);
 
-// Teste focado em fluidez: sem Wi-Fi, sem HTTPS, sem LittleFS.
-// Objetivo: medir o limite real de animacao da TFT/ESP8266.
+// Enduro Atari-style performance test.
+// Sem Wi-Fi/HTTPS: objetivo e testar fluidez e logica de desvio automatico.
 
 const uint16_t FRAME_MS = 33; // alvo ~30 FPS
 const int SCENE_Y = 26;
 const int SCENE_H = 82;
+const int PLAYER_Y = SCENE_H - 13;
 
 GFXcanvas16 framebuf(160, SCENE_H);
 
@@ -23,180 +24,209 @@ unsigned long fpsStart = 0;
 uint16_t fpsFrames = 0;
 uint16_t fpsValue = 0;
 
-// Sprite simples para os adversarios.
-const uint8_t PROGMEM CAR_ENEMY[] = {
-  0x03,0xC0,
-  0x07,0xE0,
-  0x0F,0xF0,
-  0x1F,0xF8,
-  0x3C,0x3C,
-  0x7E,0x7E,
-  0xFF,0xFF,
-  0xDB,0xDB,
-  0xC3,0xC3,
-  0x81,0x81,
-  0x81,0x81,
-  0x00,0x00
+struct Enemy {
+  int8_t lane;      // 0 esquerda, 1 centro, 2 direita
+  int16_t y;
+  uint8_t speed;
+  uint16_t color;
 };
 
+const uint8_t ENEMY_COUNT = 5;
+Enemy enemies[ENEMY_COUNT];
+
+int8_t playerLane = 2;
+int8_t targetLane = 2;
+int16_t playerX = 116;
+
 inline int roadLeftAt(int y) {
-  return 77 - (y * 58) / (SCENE_H - 1);
+  return 78 - (y * 60) / (SCENE_H - 1);
 }
 
 inline int roadRightAt(int y) {
-  return 83 + (y * 58) / (SCENE_H - 1);
+  return 82 + (y * 60) / (SCENE_H - 1);
 }
 
-void drawRoadBase() {
-  const uint16_t sky = tft.color565(78, 145, 215);
-  const uint16_t grass = tft.color565(40, 135, 45);
-  const uint16_t road = tft.color565(58, 58, 62);
-  const uint16_t snow = tft.color565(236, 236, 236);
+int laneCenter(int lane, int y) {
+  int left = roadLeftAt(y);
+  int right = roadRightAt(y);
+  int width = right - left;
 
-  framebuf.fillScreen(sky);
-  framebuf.fillRect(0, 17, 160, SCENE_H - 17, grass);
-
-  framebuf.fillTriangle(78, 17, 18, SCENE_H - 1, 80, SCENE_H - 1, road);
-  framebuf.fillTriangle(82, 17, 80, SCENE_H - 1, 142, SCENE_H - 1, road);
-  framebuf.fillRect(78, 17, 5, 3, road);
-
-  framebuf.drawLine(78, 17, 18, SCENE_H - 1, snow);
-  framebuf.drawLine(82, 17, 142, SCENE_H - 1, snow);
+  if (lane == 0) return left + width / 4;
+  if (lane == 1) return (left + right) / 2;
+  return right - width / 4;
 }
 
-void drawLaneMarkers() {
-  const uint16_t yellow = ST77XX_YELLOW;
-  const int phase = (frameNo * 4) % 32;
-
-  for (int y = 20 + phase; y < SCENE_H; y += 32) {
-    int dy = y - 17;
-    int w = 1 + dy / 18;
-    int h = 3 + dy / 11;
-    framebuf.fillRect(80 - w / 2, y, w, h, yellow);
+uint16_t enemyColor(uint8_t n) {
+  switch (n % 4) {
+    case 0: return tft.color565(226, 205, 55);   // amarelo Atari
+    case 1: return tft.color565(70, 210, 220);   // ciano
+    case 2: return tft.color565(235, 105, 55);   // laranja
+    default:return tft.color565(220, 120, 205);  // rosa
   }
 }
 
-void drawRoadsidePosts() {
-  const uint16_t white = ST77XX_WHITE;
-  const uint16_t red = tft.color565(230, 45, 45);
-  const int phase = (frameNo * 5) % 28;
+void spawnEnemy(uint8_t i, int yStart) {
+  enemies[i].lane = random(0, 3);
+  enemies[i].y = yStart;
+  enemies[i].speed = 1 + random(0, 2);
+  enemies[i].color = enemyColor(i + random(0, 4));
+}
 
-  for (int y = 20 + phase; y < SCENE_H; y += 28) {
-    int lx = roadLeftAt(y) - 5;
-    int rx = roadRightAt(y) + 5;
-    int h = 3 + (y - 17) / 9;
-    framebuf.fillRect(lx, y - h, 2, h, white);
-    framebuf.fillRect(rx, y - h, 2, h, white);
-    if (((y / 28) & 1) == 0) {
-      framebuf.drawPixel(lx, y - h, red);
-      framebuf.drawPixel(rx, y - h, red);
-    }
+void initEnemies() {
+  spawnEnemy(0, -5);
+  spawnEnemy(1, 10);
+  spawnEnemy(2, 24);
+  spawnEnemy(3, -22);
+  spawnEnemy(4, 37);
+}
+
+void drawRoad() {
+  const uint16_t green = tft.color565(0, 86, 18);
+  const uint16_t greenRoad = tft.color565(0, 78, 15);
+  const uint16_t white = tft.color565(220, 220, 220);
+
+  framebuf.fillScreen(green);
+
+  // Pista verde, como no Enduro original.
+  for (int y = 0; y < SCENE_H; y++) {
+    int left = roadLeftAt(y);
+    int right = roadRightAt(y);
+    framebuf.drawFastHLine(left, y, right - left + 1, greenRoad);
+  }
+
+  // Bordas claras em perspectiva.
+  for (int y = 1; y < SCENE_H; y++) {
+    framebuf.drawLine(roadLeftAt(y - 1), y - 1, roadLeftAt(y), y, white);
+    framebuf.drawLine(roadRightAt(y - 1), y - 1, roadRightAt(y), y, white);
+  }
+
+  // Pequenas irregularidades/curvas visuais nas bordas.
+  int phase = (frameNo / 6) % 24;
+  if (phase < 12) {
+    framebuf.drawFastHLine(roadLeftAt(40) - 2, 40, 3, white);
+    framebuf.drawFastHLine(roadRightAt(28) - 1, 28, 3, white);
+  } else {
+    framebuf.drawFastHLine(roadLeftAt(28) - 2, 28, 3, white);
+    framebuf.drawFastHLine(roadRightAt(42) - 1, 42, 3, white);
   }
 }
 
-void drawBitmapScaled1bit(int x, int y, const uint8_t* bmp, int w, int h,
-                          uint16_t color, uint8_t scale) {
-  for (int yy = 0; yy < h; yy++) {
-    for (int xx = 0; xx < w; xx++) {
-      uint16_t bitIndex = yy * w + xx;
-      uint8_t b = pgm_read_byte(bmp + (bitIndex >> 3));
-      if (b & (0x80 >> (bitIndex & 7))) {
-        if (scale == 1) framebuf.drawPixel(x + xx, y + yy, color);
-        else framebuf.fillRect(x + xx * scale, y + yy * scale, scale, scale, color);
+void drawAtariCar(int cx, int cy, uint16_t color, uint8_t scale, bool player) {
+  // Forma achatada e horizontal inspirada no sprite de Enduro.
+  int bodyW = 12 * scale;
+  int bodyH = 5 * scale;
+  int noseW = 6 * scale;
+
+  framebuf.fillRect(cx - bodyW / 2, cy - bodyH / 2, bodyW, bodyH, color);
+  framebuf.fillRect(cx - noseW / 2, cy - bodyH / 2 - 2 * scale,
+                    noseW, 2 * scale, color);
+
+  // Extensoes laterais / rodas pixeladas.
+  framebuf.fillRect(cx - bodyW / 2 - 3 * scale, cy - scale,
+                    3 * scale, scale, color);
+  framebuf.fillRect(cx - bodyW / 2 - 4 * scale, cy + scale,
+                    4 * scale, scale, color);
+  framebuf.fillRect(cx + bodyW / 2, cy - scale,
+                    3 * scale, scale, color);
+  framebuf.fillRect(cx + bodyW / 2, cy + scale,
+                    4 * scale, scale, color);
+
+  if (player) {
+    // Recorte central discreto para o carro branco parecer mais com o original.
+    framebuf.fillRect(cx - scale, cy - bodyH / 2 - scale,
+                      2 * scale, 2 * scale, ST77XX_BLACK);
+  }
+}
+
+bool dangerInLane(int lane) {
+  for (uint8_t i = 0; i < ENEMY_COUNT; i++) {
+    if (enemies[i].lane != lane) continue;
+    if (enemies[i].y >= 43 && enemies[i].y <= PLAYER_Y + 7) return true;
+  }
+  return false;
+}
+
+int dangerScore(int lane) {
+  int score = 0;
+  for (uint8_t i = 0; i < ENEMY_COUNT; i++) {
+    if (enemies[i].lane != lane) continue;
+    int d = PLAYER_Y - enemies[i].y;
+    if (d >= -6 && d < 38) score += (40 - max(0, d));
+  }
+  return score;
+}
+
+void chooseLane() {
+  if (dangerInLane(playerLane)) {
+    int bestLane = playerLane;
+    int bestScore = 9999;
+
+    for (int lane = 0; lane < 3; lane++) {
+      if (lane == playerLane) continue;
+      int score = dangerScore(lane);
+      if (score < bestScore) {
+        bestScore = score;
+        bestLane = lane;
       }
     }
+    targetLane = bestLane;
+  } else {
+    // Mantem movimento menos robotico: prefere direita se estiver livre.
+    if (playerLane != 2 && !dangerInLane(2) && (frameNo % 150) == 0) {
+      targetLane = 2;
+    }
   }
 }
 
-void drawEnemy() {
-  const uint16_t colors[3] = {
-    ST77XX_RED,
-    ST77XX_CYAN,
-    tft.color565(240, 125, 35)
-  };
+void movePlayer() {
+  int desired = laneCenter(targetLane, PLAYER_Y);
+  const int step = 2;
 
-  uint16_t cycle = (frameNo * 3) % 145;
-  int y = 20 + cycle / 2;
-  if (y >= SCENE_H - 16) return;
+  if (playerX < desired) playerX += step;
+  else if (playerX > desired) playerX -= step;
 
-  int lane = ((frameNo / 145) % 3) - 1;
-  int spread = 3 + (y - 17) / 6;
-  int x = 80 + lane * spread;
-  uint8_t scale = (y > 54) ? 2 : 1;
-  int sw = 16 * scale;
-  int sh = 12 * scale;
-
-  drawBitmapScaled1bit(x - sw / 2, y - sh / 2, CAR_ENEMY, 16, 12,
-                       colors[(frameNo / 145) % 3], scale);
+  if (abs(playerX - desired) <= step) {
+    playerX = desired;
+    playerLane = targetLane;
+  }
 }
 
-// Carro de Formula 1 visto de tras, desenhado em poucas primitivas.
-// Mantem o custo baixo, mas fica bem mais reconhecivel que o sprite anterior.
-void drawF1Player(int cx, int baseY) {
-  const uint16_t body = tft.color565(225, 28, 28);
-  const uint16_t bodyDark = tft.color565(150, 12, 12);
-  const uint16_t black = ST77XX_BLACK;
-  const uint16_t tire = tft.color565(20, 20, 20);
-  const uint16_t tireHi = tft.color565(75, 75, 75);
-  const uint16_t glass = tft.color565(85, 165, 225);
-  const uint16_t white = ST77XX_WHITE;
-  const uint16_t yellow = ST77XX_YELLOW;
+void updateEnemies() {
+  for (uint8_t i = 0; i < ENEMY_COUNT; i++) {
+    enemies[i].y += enemies[i].speed;
 
-  // Oscilacao minima da suspensao para dar vida sem tremer demais.
-  int bob = ((frameNo / 5) & 1) ? 1 : 0;
-  int y = baseY + bob;
+    if (enemies[i].y > SCENE_H + 12) {
+      spawnEnemy(i, random(-28, 3));
+    }
+  }
+}
 
-  // Asa traseira larga.
-  framebuf.fillRect(cx - 18, y - 7, 36, 4, black);
-  framebuf.fillRect(cx - 15, y - 8, 30, 2, bodyDark);
-  framebuf.fillRect(cx - 17, y - 3, 4, 3, black);
-  framebuf.fillRect(cx + 13, y - 3, 4, 3, black);
+void drawEnemies() {
+  // Longe = pequeno; perto = maior, criando profundidade.
+  for (uint8_t i = 0; i < ENEMY_COUNT; i++) {
+    int y = enemies[i].y;
+    if (y < 2 || y >= SCENE_H - 2) continue;
 
-  // Pneus traseiros grandes.
-  framebuf.fillRoundRect(cx - 20, y - 2, 8, 16, 2, tire);
-  framebuf.fillRoundRect(cx + 12, y - 2, 8, 16, 2, tire);
-  framebuf.drawFastVLine(cx - 18, y + 1, 9, tireHi);
-  framebuf.drawFastVLine(cx + 18, y + 1, 9, tireHi);
+    uint8_t scale = 1;
+    if (y > 52) scale = 2;
 
-  // Corpo central e sidepods.
-  framebuf.fillTriangle(cx, y - 20, cx - 10, y + 10, cx + 10, y + 10, body);
-  framebuf.fillRect(cx - 12, y - 2, 24, 9, body);
-  framebuf.fillTriangle(cx - 12, y - 1, cx - 18, y + 7, cx - 8, y + 7, bodyDark);
-  framebuf.fillTriangle(cx + 12, y - 1, cx + 18, y + 7, cx + 8, y + 7, bodyDark);
-
-  // Cockpit / halo simplificado.
-  framebuf.fillTriangle(cx, y - 18, cx - 5, y - 7, cx + 5, y - 7, glass);
-  framebuf.drawLine(cx - 6, y - 9, cx, y - 14, black);
-  framebuf.drawLine(cx + 6, y - 9, cx, y - 14, black);
-  framebuf.drawFastHLine(cx - 5, y - 9, 11, black);
-
-  // Tampa do motor / espinha traseira.
-  framebuf.fillRect(cx - 3, y - 7, 6, 13, bodyDark);
-  framebuf.drawFastVLine(cx, y - 6, 10, white);
-
-  // Difusor e luz de chuva traseira.
-  framebuf.fillTriangle(cx - 9, y + 7, cx - 3, y + 13, cx - 1, y + 7, black);
-  framebuf.fillTriangle(cx + 9, y + 7, cx + 3, y + 13, cx + 1, y + 7, black);
-  framebuf.fillRect(cx - 2, y + 8, 4, 3, black);
-  if (((frameNo / 6) & 1) == 0) framebuf.fillRect(cx - 1, y + 8, 2, 2, yellow);
-
-  // Pequenos destaques para dar volume ao carro.
-  framebuf.drawFastHLine(cx - 9, y, 7, white);
-  framebuf.drawFastHLine(cx + 3, y, 7, white);
+    int x = laneCenter(enemies[i].lane, y);
+    drawAtariCar(x, y, enemies[i].color, scale, false);
+  }
 }
 
 void drawPlayer() {
-  drawF1Player(80, SCENE_H - 17);
+  uint16_t playerColor = tft.color565(224, 214, 224);
+  int bob = ((frameNo / 5) & 1) ? 1 : 0;
+  drawAtariCar(playerX, PLAYER_Y + bob, playerColor, 2, true);
 }
 
 void renderFrame() {
-  drawRoadBase();
-  drawLaneMarkers();
-  drawRoadsidePosts();
-  drawEnemy();
+  drawRoad();
+  drawEnemies();
   drawPlayer();
 
-  // Uma unica transferencia SPI grande por quadro.
+  // Uma unica transferencia SPI por quadro.
   tft.drawRGBBitmap(0, SCENE_Y, framebuf.getBuffer(), 160, SCENE_H);
 }
 
@@ -206,19 +236,25 @@ void drawHeader() {
   tft.setTextSize(1);
   tft.setTextColor(ST77XX_WHITE);
   tft.setCursor(4, 4);
-  tft.print("ENDURO PERFORMANCE TEST");
+  tft.print("ENDURO ATARI TEST");
   tft.setCursor(4, 15);
   tft.print("FPS: ");
   tft.fillRect(30, 15, 28, 8, ST77XX_BLACK);
   tft.setCursor(30, 15);
+  tft.setTextColor(ST77XX_GREEN);
   tft.print(fpsValue);
 }
 
 void setup() {
   Serial.begin(115200);
+  randomSeed(micros());
+
   tft.initR(INITR_BLACKTAB);
   tft.setRotation(1);
   tft.fillScreen(ST77XX_BLACK);
+
+  playerX = laneCenter(playerLane, PLAYER_Y);
+  initEnemies();
 
   fpsStart = millis();
   lastFrame = millis();
@@ -231,6 +267,10 @@ void loop() {
   if (now - lastFrame >= FRAME_MS) {
     lastFrame = now;
     frameNo++;
+
+    updateEnemies();
+    chooseLane();
+    movePlayer();
     renderFrame();
     fpsFrames++;
   }
