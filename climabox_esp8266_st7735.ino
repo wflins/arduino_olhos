@@ -35,12 +35,14 @@
 Adafruit_ST7735 tft(TFT_CS, TFT_DC, TFT_RST);
 
 const char* AP_SSID = "ClimaBox-Setup";
-const char* AP_PASSWORD = "climabox"; // minimo 8 caracteres
+const char* AP_PASSWORD = "climabox";
 const char* CONFIG_FILE = "/climabox.json";
 
 const unsigned long WIFI_CONNECT_TIMEOUT = 12000UL;
 const unsigned long WEATHER_INTERVAL = 10UL * 60UL * 1000UL;
+const unsigned long SCREEN_INTERVAL = 20UL * 1000UL;
 const unsigned long BUTTON_HOLD_TIME = 5000UL;
+const uint8_t TOTAL_SCREENS = 4;
 
 String cidade = "Manaus";
 String uf = "AM";
@@ -48,15 +50,36 @@ float latitude = -3.1190f;
 float longitude = -60.0217f;
 bool coordenadasValidas = true;
 
+// Clima
 float temperatura = NAN;
 float sensacao = NAN;
 float umidade = NAN;
 float vento = NAN;
+float rajada = NAN;
+float pressao = NAN;
+float precipitacao = NAN;
+float nuvens = NAN;
+float visibilidade = NAN;
 int weatherCode = -1;
 bool isDay = true;
 String weatherTime = "";
 
+// Qualidade do ar / poluentes
+float aqi = NAN;
+float pm25 = NAN;
+float pm10 = NAN;
+float co = NAN;
+float no2 = NAN;
+float so2 = NAN;
+float ozonio = NAN;
+float aerosol = NAN;
+float poeira = NAN;
+float uv = NAN;
+String airTime = "";
+
 unsigned long ultimaConsulta = 0;
+unsigned long ultimaTrocaTela = 0;
+uint8_t telaAtual = 0;
 
 // ============================================================
 // Utilitarios da tela
@@ -86,6 +109,33 @@ void textoLinha(int y, const String& texto, uint16_t cor = ST77XX_WHITE, uint8_t
 void telaErro(const String& titulo, const String& detalhe) {
   cabecalho(titulo, ST77XX_RED);
   textoLinha(38, detalhe, ST77XX_WHITE, 1);
+}
+
+void rodapeAtualizado(const String& hora) {
+  tft.setTextColor(tft.color565(120, 120, 120));
+  tft.setTextSize(1);
+  tft.setCursor(6, 119);
+  tft.print("Atualizado ");
+  tft.print(hora.length() ? hora : "--:--");
+}
+
+String horaISO(const String& iso) {
+  if (iso.length() >= 16) return iso.substring(11, 16);
+  return "--:--";
+}
+
+void valorLinha(int y, const String& rotulo, float valor, const String& unidade,
+                uint16_t cor = ST77XX_WHITE, uint8_t casas = 0) {
+  tft.setTextColor(cor);
+  tft.setTextSize(1);
+  tft.setCursor(6, y);
+  tft.print(rotulo);
+  if (isnan(valor)) {
+    tft.print("--");
+  } else {
+    tft.print(valor, casas);
+    tft.print(unidade);
+  }
 }
 
 // ============================================================
@@ -199,7 +249,6 @@ void desenharQrCode(const String& conteudo, int origemX, int origemY, int escala
 void mostrarPortalNaTela() {
   telaLimpa(ST77XX_BLACK);
 
-  // QR Wi-Fi: a camera do celular oferece conexao direta ao AP.
   String payload = String("WIFI:T:WPA;S:") + AP_SSID + ";P:" + AP_PASSWORD + ";;";
   desenharQrCode(payload, 4, 4, 3);
 
@@ -260,10 +309,7 @@ bool geocodificarCidade() {
   client.setInsecure();
   HTTPClient http;
 
-  if (!http.begin(client, url)) {
-    Serial.println("Falha em http.begin geocoding");
-    return false;
-  }
+  if (!http.begin(client, url)) return false;
 
   http.setTimeout(10000);
   int codigo = http.GET();
@@ -279,17 +325,10 @@ bool geocodificarCidade() {
 
   DynamicJsonDocument doc(4096);
   DeserializationError erro = deserializeJson(doc, payload);
-  if (erro) {
-    Serial.print("Geocoding JSON: ");
-    Serial.println(erro.c_str());
-    return false;
-  }
+  if (erro) return false;
 
   JsonArray resultados = doc["results"].as<JsonArray>();
-  if (resultados.isNull() || resultados.size() == 0) {
-    Serial.println("Cidade nao encontrada");
-    return false;
-  }
+  if (resultados.isNull() || resultados.size() == 0) return false;
 
   JsonObject local = resultados[0];
   latitude = local["latitude"].as<float>();
@@ -297,18 +336,6 @@ bool geocodificarCidade() {
 
   const char* nomeEncontrado = local["name"] | nullptr;
   if (nomeEncontrado && strlen(nomeEncontrado) > 0) cidade = nomeEncontrado;
-
-  const char* admin1 = local["admin1"] | nullptr;
-  Serial.print("Local encontrado: ");
-  Serial.print(cidade);
-  if (admin1) {
-    Serial.print(" / ");
-    Serial.print(admin1);
-  }
-  Serial.print(" -> ");
-  Serial.print(latitude, 5);
-  Serial.print(", ");
-  Serial.println(longitude, 5);
 
   coordenadasValidas = true;
   salvarConfig();
@@ -322,7 +349,7 @@ bool geocodificarCidade() {
 bool abrirPortalConfiguracao() {
   WiFiManager wm;
   wm.setAPCallback(callbackAP);
-  wm.setConfigPortalTimeout(0); // permanece aberto ate concluir
+  wm.setConfigPortalTimeout(0);
   wm.setMinimumSignalQuality(8);
   wm.setRemoveDuplicateAPs(true);
   wm.setClass("invert");
@@ -345,10 +372,7 @@ bool abrirPortalConfiguracao() {
   mostrarPortalNaTela();
 
   bool ok = wm.startConfigPortal(AP_SSID, AP_PASSWORD);
-  if (!ok || WiFi.status() != WL_CONNECTED) {
-    Serial.println("Portal encerrado sem conexao");
-    return false;
-  }
+  if (!ok || WiFi.status() != WL_CONNECTED) return false;
 
   String novaCidade = String(campoCidade.getValue());
   String novaUf = String(campoUF.getValue());
@@ -383,8 +407,7 @@ bool abrirPortalConfiguracao() {
 // ============================================================
 
 bool haWifiSalvo() {
-  String ssidSalvo = WiFi.SSID();
-  return ssidSalvo.length() > 0;
+  return WiFi.SSID().length() > 0;
 }
 
 bool conectarWifiSalvo() {
@@ -392,10 +415,7 @@ bool conectarWifiSalvo() {
   WiFi.setAutoReconnect(true);
   WiFi.persistent(true);
 
-  if (!haWifiSalvo()) {
-    Serial.println("Nenhum Wi-Fi salvo");
-    return false;
-  }
+  if (!haWifiSalvo()) return false;
 
   cabecalho("CLIMABOX");
   textoLinha(38, "Conectando Wi-Fi...");
@@ -416,20 +436,11 @@ bool conectarWifiSalvo() {
     yield();
   }
 
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.print("Conectado em ");
-    Serial.print(WiFi.SSID());
-    Serial.print(" IP ");
-    Serial.println(WiFi.localIP());
-    return true;
-  }
-
-  Serial.println("Nao foi possivel conectar ao Wi-Fi salvo");
-  return false;
+  return WiFi.status() == WL_CONNECTED;
 }
 
 // ============================================================
-// Clima Open-Meteo
+// Clima e qualidade do ar - Open-Meteo
 // ============================================================
 
 String descricaoTempo(int codigo) {
@@ -445,6 +456,31 @@ String descricaoTempo(int codigo) {
   if (codigo >= 85 && codigo <= 86) return "Neve forte";
   if (codigo >= 95 && codigo <= 99) return "Trovoadas";
   return "Tempo variavel";
+}
+
+String descricaoAQI(float valor) {
+  if (isnan(valor)) return "Sem dados";
+  if (valor <= 50) return "Boa";
+  if (valor <= 100) return "Moderada";
+  if (valor <= 150) return "Ruim p/ sensiveis";
+  if (valor <= 200) return "Ruim";
+  if (valor <= 300) return "Muito ruim";
+  return "Perigosa";
+}
+
+uint16_t corAQI(float valor) {
+  if (isnan(valor)) return ST77XX_WHITE;
+  if (valor <= 50) return ST77XX_GREEN;
+  if (valor <= 100) return ST77XX_YELLOW;
+  if (valor <= 150) return tft.color565(255, 140, 0);
+  return ST77XX_RED;
+}
+
+String nivelFumaca() {
+  if (isnan(pm25) && isnan(aerosol)) return "Sem dados";
+  if ((!isnan(pm25) && pm25 >= 55.0f) || (!isnan(aerosol) && aerosol >= 1.0f)) return "ALTA";
+  if ((!isnan(pm25) && pm25 >= 35.0f) || (!isnan(aerosol) && aerosol >= 0.5f)) return "MODERADA";
+  return "BAIXA";
 }
 
 void desenharSol(int cx, int cy) {
@@ -506,11 +542,6 @@ void desenharIconeClima(int code, bool dia) {
   }
 }
 
-String horaDaConsulta() {
-  if (weatherTime.length() >= 16) return weatherTime.substring(11, 16);
-  return "--:--";
-}
-
 void mostrarClima() {
   telaLimpa();
   tft.setTextWrap(false);
@@ -527,7 +558,6 @@ void mostrarClima() {
   tft.setTextColor(ST77XX_GREEN);
   tft.setCursor(124, 5);
   tft.print("WiFi");
-
   tft.drawFastHLine(0, 17, 160, tft.color565(70, 70, 70));
 
   desenharIconeClima(weatherCode, isDay);
@@ -546,26 +576,92 @@ void mostrarClima() {
   tft.setTextSize(1);
   tft.setCursor(68, 64);
   tft.print(descricaoTempo(weatherCode));
-
   tft.drawFastHLine(0, 87, 160, tft.color565(70, 70, 70));
 
-  tft.setCursor(6, 96);
-  tft.print("Sensacao: ");
-  if (!isnan(sensacao)) tft.print(String(sensacao, 0) + "C"); else tft.print("--");
-
-  tft.setCursor(6, 108);
-  tft.print("Umidade:  ");
-  if (!isnan(umidade)) tft.print(String(umidade, 0) + "%"); else tft.print("--");
+  valorLinha(96, "Sensacao: ", sensacao, "C");
+  valorLinha(108, "Umidade:  ", umidade, "%");
 
   tft.setCursor(92, 96);
   tft.print("Vento:");
   tft.setCursor(92, 108);
   if (!isnan(vento)) tft.print(String(vento, 0) + " km/h"); else tft.print("--");
 
-  tft.setTextColor(tft.color565(130, 130, 130));
-  tft.setCursor(6, 120);
-  tft.print("Atualizado ");
-  tft.print(horaDaConsulta());
+  rodapeAtualizado(horaISO(weatherTime));
+}
+
+void mostrarAtmosfera() {
+  cabecalho("ATMOSFERA", ST77XX_CYAN);
+
+  valorLinha(35, "Umidade       ", umidade, "%");
+  valorLinha(50, "Pressao       ", pressao, " hPa");
+  valorLinha(65, "Nuvens        ", nuvens, "%");
+  valorLinha(80, "Visibilidade  ", isnan(visibilidade) ? NAN : visibilidade / 1000.0f, " km", ST77XX_WHITE, 1);
+  valorLinha(95, "Precipitacao  ", precipitacao, " mm", ST77XX_WHITE, 1);
+  valorLinha(110, "Rajadas       ", rajada, " km/h");
+
+  rodapeAtualizado(horaISO(weatherTime));
+}
+
+void mostrarQualidadeAr() {
+  cabecalho("QUALIDADE AR", corAQI(aqi));
+
+  tft.setTextColor(corAQI(aqi));
+  tft.setTextSize(2);
+  tft.setCursor(6, 34);
+  tft.print("AQI ");
+  if (!isnan(aqi)) tft.print(aqi, 0); else tft.print("--");
+
+  tft.setTextSize(1);
+  tft.setCursor(86, 38);
+  tft.print(descricaoAQI(aqi));
+
+  valorLinha(62, "PM2.5   ", pm25, " ug/m3", ST77XX_WHITE, 1);
+  valorLinha(77, "PM10    ", pm10, " ug/m3", ST77XX_WHITE, 1);
+  valorLinha(92, "Ozonio  ", ozonio, " ug/m3", ST77XX_WHITE, 1);
+  valorLinha(107, "UV      ", uv, "", ST77XX_WHITE, 1);
+
+  rodapeAtualizado(horaISO(airTime));
+}
+
+void mostrarPoluentes() {
+  cabecalho("FUMACA / AR", ST77XX_YELLOW);
+
+  tft.setTextSize(1);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setCursor(6, 34);
+  tft.print("Indicador fumaca: ");
+  String fuma = nivelFumaca();
+  if (fuma == "ALTA") tft.setTextColor(ST77XX_RED);
+  else if (fuma == "MODERADA") tft.setTextColor(ST77XX_YELLOW);
+  else tft.setTextColor(ST77XX_GREEN);
+  tft.print(fuma);
+
+  valorLinha(52, "CO       ", co, " ug/m3", ST77XX_WHITE, 0);
+  valorLinha(66, "NO2      ", no2, " ug/m3", ST77XX_WHITE, 1);
+  valorLinha(80, "SO2      ", so2, " ug/m3", ST77XX_WHITE, 1);
+  valorLinha(94, "Aerosol  ", aerosol, "", ST77XX_WHITE, 2);
+  valorLinha(108, "Poeira   ", poeira, " ug/m3", ST77XX_WHITE, 1);
+
+  rodapeAtualizado(horaISO(airTime));
+}
+
+void mostrarTelaAtual() {
+  switch (telaAtual) {
+    case 0: mostrarClima(); break;
+    case 1: mostrarAtmosfera(); break;
+    case 2: mostrarQualidadeAr(); break;
+    case 3: mostrarPoluentes(); break;
+    default:
+      telaAtual = 0;
+      mostrarClima();
+      break;
+  }
+}
+
+void proximaTela() {
+  telaAtual = (telaAtual + 1) % TOTAL_SCREENS;
+  ultimaTrocaTela = millis();
+  mostrarTelaAtual();
 }
 
 bool buscarClima() {
@@ -576,57 +672,128 @@ bool buscarClima() {
 
   String url = "https://api.open-meteo.com/v1/forecast?latitude=" + String(latitude, 5) +
                "&longitude=" + String(longitude, 5) +
-               "&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,is_day,wind_speed_10m" +
+               "&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,is_day,wind_speed_10m,wind_gusts_10m,surface_pressure,precipitation,cloud_cover,visibility" +
                "&timezone=auto";
 
   BearSSL::WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
 
-  if (!http.begin(client, url)) {
-    telaErro("CLIMA", "Falha ao iniciar HTTP");
-    return false;
-  }
-
+  if (!http.begin(client, url)) return false;
   http.setTimeout(12000);
+
   int codigo = http.GET();
   if (codigo != HTTP_CODE_OK) {
     Serial.print("Weather HTTP: ");
     Serial.println(codigo);
     http.end();
-    telaErro("CLIMA", "HTTP " + String(codigo));
     return false;
   }
 
   String payload = http.getString();
   http.end();
 
-  DynamicJsonDocument doc(4096);
+  DynamicJsonDocument doc(6144);
   DeserializationError erro = deserializeJson(doc, payload);
   if (erro) {
     Serial.print("Weather JSON: ");
     Serial.println(erro.c_str());
-    telaErro("CLIMA", "Resposta JSON invalida");
     return false;
   }
 
-  temperatura = doc["current"]["temperature_2m"] | NAN;
-  sensacao = doc["current"]["apparent_temperature"] | NAN;
-  umidade = doc["current"]["relative_humidity_2m"] | NAN;
-  vento = doc["current"]["wind_speed_10m"] | NAN;
-  weatherCode = doc["current"]["weather_code"] | -1;
-  isDay = (doc["current"]["is_day"] | 1) == 1;
-  weatherTime = String((const char*)(doc["current"]["time"] | ""));
+  JsonObject atual = doc["current"];
+  temperatura = atual["temperature_2m"] | NAN;
+  sensacao = atual["apparent_temperature"] | NAN;
+  umidade = atual["relative_humidity_2m"] | NAN;
+  vento = atual["wind_speed_10m"] | NAN;
+  rajada = atual["wind_gusts_10m"] | NAN;
+  pressao = atual["surface_pressure"] | NAN;
+  precipitacao = atual["precipitation"] | NAN;
+  nuvens = atual["cloud_cover"] | NAN;
+  visibilidade = atual["visibility"] | NAN;
+  weatherCode = atual["weather_code"] | -1;
+  isDay = (atual["is_day"] | 1) == 1;
+  weatherTime = String((const char*)(atual["time"] | ""));
 
-  Serial.print("Clima: ");
+  Serial.print("Clima atualizado: ");
   Serial.print(temperatura);
-  Serial.print(" C, umidade ");
+  Serial.print(" C / umidade ");
   Serial.print(umidade);
-  Serial.print("%, codigo ");
-  Serial.println(weatherCode);
-
-  mostrarClima();
+  Serial.println("%");
   return true;
+}
+
+bool buscarQualidadeAr() {
+  if (WiFi.status() != WL_CONNECTED || !coordenadasValidas) return false;
+
+  String url = "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=" + String(latitude, 5) +
+               "&longitude=" + String(longitude, 5) +
+               "&current=us_aqi,pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone,aerosol_optical_depth,dust,uv_index" +
+               "&timezone=auto";
+
+  BearSSL::WiFiClientSecure client;
+  client.setInsecure();
+  HTTPClient http;
+
+  if (!http.begin(client, url)) return false;
+  http.setTimeout(12000);
+
+  int codigo = http.GET();
+  if (codigo != HTTP_CODE_OK) {
+    Serial.print("Air Quality HTTP: ");
+    Serial.println(codigo);
+    http.end();
+    return false;
+  }
+
+  String payload = http.getString();
+  http.end();
+
+  DynamicJsonDocument doc(6144);
+  DeserializationError erro = deserializeJson(doc, payload);
+  if (erro) {
+    Serial.print("Air Quality JSON: ");
+    Serial.println(erro.c_str());
+    return false;
+  }
+
+  JsonObject atual = doc["current"];
+  aqi = atual["us_aqi"] | NAN;
+  pm10 = atual["pm10"] | NAN;
+  pm25 = atual["pm2_5"] | NAN;
+  co = atual["carbon_monoxide"] | NAN;
+  no2 = atual["nitrogen_dioxide"] | NAN;
+  so2 = atual["sulphur_dioxide"] | NAN;
+  ozonio = atual["ozone"] | NAN;
+  aerosol = atual["aerosol_optical_depth"] | NAN;
+  poeira = atual["dust"] | NAN;
+  uv = atual["uv_index"] | NAN;
+  airTime = String((const char*)(atual["time"] | ""));
+
+  Serial.print("AQI atualizado: ");
+  Serial.print(aqi);
+  Serial.print(" / PM2.5 ");
+  Serial.println(pm25);
+  return true;
+}
+
+void atualizarDados() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  cabecalho("CLIMABOX");
+  textoLinha(42, "Atualizando clima...");
+  bool climaOk = buscarClima();
+
+  textoLinha(62, "Atualizando qualidade ar...");
+  bool arOk = buscarQualidadeAr();
+
+  Serial.print("Atualizacao: clima=");
+  Serial.print(climaOk ? "OK" : "ERRO");
+  Serial.print(" ar=");
+  Serial.println(arOk ? "OK" : "ERRO");
+
+  mostrarTelaAtual();
+  ultimaTrocaTela = millis();
 }
 
 // ============================================================
@@ -653,7 +820,8 @@ void verificarBotaoConfig() {
       delay(500);
       abrirPortalConfiguracao();
       ultimaConsulta = 0;
-      buscarClima();
+      telaAtual = 0;
+      atualizarDados();
       return;
     }
 
@@ -661,7 +829,10 @@ void verificarBotaoConfig() {
     yield();
   }
 
-  if (exibiuAviso) mostrarClima();
+  if (exibiuAviso) {
+    mostrarTelaAtual();
+    ultimaTrocaTela = millis();
+  }
 }
 
 // ============================================================
@@ -675,7 +846,7 @@ void setup() {
   pinMode(CONFIG_BUTTON, INPUT_PULLUP);
 
   tft.initR(INITR_BLACKTAB);
-  tft.setRotation(1); // 160x128 paisagem
+  tft.setRotation(1);
   tft.setTextWrap(false);
   telaLimpa();
 
@@ -690,8 +861,6 @@ void setup() {
     carregarConfig();
   }
 
-  // Regra principal: nunca fica indefinidamente tentando Wi-Fi.
-  // Sem credencial salva, ou sem conexao em 12 s, abre o portal.
   if (!conectarWifiSalvo()) {
     if (!abrirPortalConfiguracao()) {
       telaErro("SEM WIFI", "Reinicie para tentar de novo");
@@ -706,8 +875,10 @@ void setup() {
     }
   }
 
-  buscarClima();
+  telaAtual = 0;
+  atualizarDados();
   ultimaConsulta = millis();
+  ultimaTrocaTela = millis();
 }
 
 void loop() {
@@ -725,9 +896,11 @@ void loop() {
 
   if (agora - ultimaConsulta >= WEATHER_INTERVAL) {
     ultimaConsulta = agora;
-    if (WiFi.status() == WL_CONNECTED) {
-      buscarClima();
-    }
+    if (WiFi.status() == WL_CONNECTED) atualizarDados();
+  }
+
+  if (agora - ultimaTrocaTela >= SCREEN_INTERVAL) {
+    proximaTela();
   }
 
   delay(20);
