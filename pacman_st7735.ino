@@ -9,21 +9,23 @@
 Adafruit_ST7735 tft(TFT_CS, TFT_DC, TFT_RST);
 
 // ============================================================
-// Pac-Man ST7735 - teste de fluidez
+// Pac-Man ST7735 - travessia completa e fluida
 // NodeMCU ESP8266 + ST7735 1.8" 160x128
 //
 // Sequencia:
-// 1) Fantasmas perseguem Pac-Man.
-// 2) Pac-Man come a pastilha de energia.
-// 3) Fantasmas ficam azuis e fogem.
-// 4) Pac-Man volta perseguindo os fantasmas.
+// 1) Fantasmas perseguem Pac-Man da esquerda para a direita.
+// 2) Pac-Man atravessa a tela inteira e come a pastilha de energia.
+// 3) Fantasmas ficam azuis.
+// 4) Todos voltam da direita para a esquerda, com Pac-Man perseguindo.
+// 5) Ao sair completamente da tela, o ciclo reinicia.
 //
-// Sem Wi-Fi / HTTPS / LittleFS para priorizar FPS.
+// Sem Wi-Fi/HTTPS/LittleFS para priorizar FPS.
 // ============================================================
 
 const uint16_t FRAME_MS = 33; // alvo ~30 FPS
 const int SCENE_Y = 18;
 const int SCENE_H = 92;
+const int CORRIDOR_Y = 47;
 
 GFXcanvas16 framebuf(160, SCENE_H);
 
@@ -33,26 +35,6 @@ unsigned long fpsStart = 0;
 uint16_t fpsFrames = 0;
 uint16_t fpsValue = 0;
 
-// Estados da animacao.
-enum ChaseState : uint8_t {
-  CHASE_GHOSTS = 0,
-  POWER_PELLET = 1,
-  CHASE_PACMAN = 2
-};
-
-ChaseState state = CHASE_GHOSTS;
-unsigned long stateStart = 0;
-
-// Posicoes principais.
-int pacX = 118;
-int pacDir = 1; // 1 direita, -1 esquerda
-int ghostBaseX = 84;
-int corridorY = 48;
-
-// ============================================================
-// Cores
-// ============================================================
-
 uint16_t BLUE_WALL;
 uint16_t PINK_GHOST;
 uint16_t CYAN_GHOST;
@@ -61,17 +43,33 @@ uint16_t BLUE_FRIGHT;
 uint16_t EYE_BLUE;
 
 // ============================================================
+// Estados
+// ============================================================
+
+enum ChaseState : uint8_t {
+  RUN_RIGHT = 0,     // fantasmas perseguem Pac-Man
+  POWER_FLASH = 1,  // energia / inversao
+  RUN_LEFT = 2      // Pac-Man persegue fantasmas azuis
+};
+
+ChaseState state = RUN_RIGHT;
+unsigned long stateStart = 0;
+
+// Posicao-base do grupo.
+// RUN_RIGHT: cresce ate todo mundo sair pela direita.
+// RUN_LEFT: decresce ate todo mundo sair pela esquerda.
+int groupX = -85;
+
+// ============================================================
 // Labirinto leve
 // ============================================================
 
 void drawMaze() {
   framebuf.fillScreen(ST77XX_BLACK);
 
-  // Bordas principais.
   framebuf.drawRect(1, 1, 158, SCENE_H - 2, BLUE_WALL);
   framebuf.drawRect(4, 4, 152, SCENE_H - 8, BLUE_WALL);
 
-  // Estruturas fixas lembrando o labirinto original.
   framebuf.drawFastHLine(11, 18, 35, BLUE_WALL);
   framebuf.drawFastHLine(114, 18, 35, BLUE_WALL);
   framebuf.drawFastHLine(11, 72, 35, BLUE_WALL);
@@ -85,48 +83,49 @@ void drawMaze() {
   framebuf.drawRect(67, 13, 26, 13, BLUE_WALL);
   framebuf.drawRect(67, 66, 26, 13, BLUE_WALL);
 
-  // Tunel central livre.
-  framebuf.drawFastHLine(4, 38, 36, BLUE_WALL);
-  framebuf.drawFastHLine(120, 38, 36, BLUE_WALL);
+  // Tunel central visualmente livre.
+  framebuf.drawFastHLine(4, 37, 36, BLUE_WALL);
+  framebuf.drawFastHLine(120, 37, 36, BLUE_WALL);
   framebuf.drawFastHLine(4, 58, 36, BLUE_WALL);
   framebuf.drawFastHLine(120, 58, 36, BLUE_WALL);
 
-  // Pellets normais no corredor central.
-  int offset = (frameNo * 2) % 16;
-  for (int x = -16; x < 176; x += 16) {
-    int xx = x - offset;
-    if (xx > 6 && xx < 154) framebuf.fillCircle(xx, corridorY, 1, ST77XX_WHITE);
+  // Pellets fixos. Nao rolamos o fundo: os personagens realmente atravessam a tela.
+  for (int x = 10; x <= 150; x += 14) {
+    framebuf.fillCircle(x, CORRIDOR_Y, 1, ST77XX_WHITE);
+  }
+
+  // Power pellet no extremo direito durante a ida.
+  if (state == RUN_RIGHT || state == POWER_FLASH) {
+    if (state != POWER_FLASH || ((frameNo / 3) & 1) == 0) {
+      framebuf.fillCircle(149, CORRIDOR_Y, 4, ST77XX_WHITE);
+    }
   }
 }
 
 // ============================================================
-// Sprites leves
+// Sprites
 // ============================================================
 
 void drawPacman(int x, int y, int dir, bool mouthOpen) {
   framebuf.fillCircle(x, y, 10, ST77XX_YELLOW);
 
   if (mouthOpen) {
-    if (dir > 0) {
+    if (dir > 0)
       framebuf.fillTriangle(x + 1, y, x + 12, y - 7, x + 12, y + 7, ST77XX_BLACK);
-    } else {
+    else
       framebuf.fillTriangle(x - 1, y, x - 12, y - 7, x - 12, y + 7, ST77XX_BLACK);
-    }
   } else {
     if (dir > 0) framebuf.drawFastHLine(x + 2, y, 9, ST77XX_BLACK);
     else framebuf.drawFastHLine(x - 10, y, 9, ST77XX_BLACK);
   }
 
-  int eyeX = x + (dir > 0 ? 2 : -2);
-  framebuf.fillCircle(eyeX, y - 5, 1, ST77XX_BLACK);
+  framebuf.fillCircle(x + (dir > 0 ? 2 : -2), y - 5, 1, ST77XX_BLACK);
 }
 
 void drawGhost(int x, int y, uint16_t color, int dir, bool frightened, uint8_t legPhase) {
-  // Corpo.
   framebuf.fillCircle(x, y - 4, 9, color);
   framebuf.fillRect(x - 9, y - 4, 18, 12, color);
 
-  // Base ondulada em dois frames.
   if (legPhase == 0) {
     framebuf.fillTriangle(x - 9, y + 8, x - 5, y + 4, x - 1, y + 8, color);
     framebuf.fillTriangle(x - 1, y + 8, x + 3, y + 4, x + 7, y + 8, color);
@@ -138,7 +137,6 @@ void drawGhost(int x, int y, uint16_t color, int dir, bool frightened, uint8_t l
   }
 
   if (frightened) {
-    // Olhos e boca simples de fantasma assustado.
     framebuf.fillCircle(x - 4, y - 4, 2, ST77XX_WHITE);
     framebuf.fillCircle(x + 4, y - 4, 2, ST77XX_WHITE);
     framebuf.drawPixel(x - 5, y + 3, ST77XX_WHITE);
@@ -148,108 +146,95 @@ void drawGhost(int x, int y, uint16_t color, int dir, bool frightened, uint8_t l
   } else {
     framebuf.fillCircle(x - 4, y - 4, 3, ST77XX_WHITE);
     framebuf.fillCircle(x + 4, y - 4, 3, ST77XX_WHITE);
-    int pupilDx = dir > 0 ? 1 : -1;
-    framebuf.fillCircle(x - 4 + pupilDx, y - 4, 1, EYE_BLUE);
-    framebuf.fillCircle(x + 4 + pupilDx, y - 4, 1, EYE_BLUE);
+    int dx = dir > 0 ? 1 : -1;
+    framebuf.fillCircle(x - 4 + dx, y - 4, 1, EYE_BLUE);
+    framebuf.fillCircle(x + 4 + dx, y - 4, 1, EYE_BLUE);
   }
 }
 
 // ============================================================
-// Sequencia de perseguicao
+// Movimento
 // ============================================================
 
-void updateState() {
+void updateAnimation() {
   unsigned long now = millis();
-  unsigned long elapsed = now - stateStart;
 
-  switch (state) {
-    case CHASE_GHOSTS:
-      // 7 segundos de fantasmas perseguindo Pac-Man.
-      if (elapsed >= 7000UL) {
-        state = POWER_PELLET;
-        stateStart = now;
-      }
-      break;
+  if (state == RUN_RIGHT) {
+    // Pac-Man fica 80 px a frente do ultimo fantasma.
+    // groupX e a posicao do fantasma de tras.
+    groupX += 2;
 
-    case POWER_PELLET:
-      // Curta pausa para destacar a pastilha de energia.
-      if (elapsed >= 900UL) {
-        state = CHASE_PACMAN;
-        stateStart = now;
-      }
-      break;
+    // Pac-Man chega ao power pellet por volta de x=149.
+    // pac = groupX + 82 => groupX ~= 67.
+    if (groupX >= 67) {
+      state = POWER_FLASH;
+      stateStart = now;
+    }
 
-    case CHASE_PACMAN:
-      // 7 segundos de Pac-Man perseguindo os fantasmas azuis.
-      if (elapsed >= 7000UL) {
-        state = CHASE_GHOSTS;
-        stateStart = now;
-      }
-      break;
+  } else if (state == POWER_FLASH) {
+    // Pequena pausa dramatica para a energia.
+    if (now - stateStart >= 450UL) {
+      state = RUN_LEFT;
+
+      // Comeca com os fantasmas na frente, ja no lado direito.
+      // Assim todos atravessam a tela inteira no retorno.
+      groupX = 205;
+    }
+
+  } else { // RUN_LEFT
+    groupX -= 2;
+
+    // O Pac-Man e o ultimo elemento do grupo no retorno.
+    // So reinicia quando ele tambem saiu totalmente pela esquerda.
+    if (groupX < -95) {
+      state = RUN_RIGHT;
+      groupX = -85;
+      stateStart = now;
+    }
   }
 }
 
-void drawChaseScene() {
+void drawScene() {
   drawMaze();
 
   bool mouthOpen = ((frameNo / 2) & 1) == 0;
   uint8_t legPhase = (frameNo / 3) & 1;
 
-  if (state == CHASE_GHOSTS) {
-    // Tudo se move para a direita. Pac-Man esta na frente.
-    int swing = (frameNo / 2) % 10;
+  if (state == RUN_RIGHT) {
+    // Da esquerda para a direita:
+    // vermelho -> rosa -> ciano -> Pac-Man
+    int g3 = groupX;
+    int g2 = groupX + 24;
+    int g1 = groupX + 48;
+    int pac = groupX + 82;
 
-    pacDir = 1;
-    pacX = 118 + (swing < 5 ? swing : 9 - swing);
+    drawGhost(g3, CORRIDOR_Y, ST77XX_RED, 1, false, legPhase);
+    drawGhost(g2, CORRIDOR_Y, PINK_GHOST, 1, false, legPhase);
+    drawGhost(g1, CORRIDOR_Y, CYAN_GHOST, 1, false, legPhase);
+    drawPacman(pac, CORRIDOR_Y, 1, mouthOpen);
 
-    int g1 = pacX - 31;
-    int g2 = pacX - 55;
-    int g3 = pacX - 79;
-
-    drawPacman(pacX, corridorY, pacDir, mouthOpen);
-    drawGhost(g1, corridorY, ST77XX_RED, 1, false, legPhase);
-    drawGhost(g2, corridorY, PINK_GHOST, 1, false, legPhase);
-    drawGhost(g3, corridorY, CYAN_GHOST, 1, false, legPhase);
-
-    // Pastilha de energia fica mais a frente, aguardando o momento da virada.
-    framebuf.fillCircle(149, corridorY, 4, ST77XX_WHITE);
-
-  } else if (state == POWER_PELLET) {
-    // Pac-Man chega na pastilha e a consome.
-    pacDir = 1;
-    pacX = 139;
-    drawPacman(pacX, corridorY, pacDir, mouthOpen);
-
-    // Pisca a energia pouco antes da inversao.
-    if (((frameNo / 3) & 1) == 0) framebuf.fillCircle(151, corridorY, 5, ST77XX_WHITE);
-
-    drawGhost(101, corridorY, ST77XX_RED, 1, false, legPhase);
-    drawGhost(77, corridorY, PINK_GHOST, 1, false, legPhase);
-    drawGhost(53, corridorY, CYAN_GHOST, 1, false, legPhase);
+  } else if (state == POWER_FLASH) {
+    // Pac-Man sobre a pastilha; fantasmas ainda atras.
+    drawGhost(76, CORRIDOR_Y, ST77XX_RED, 1, false, legPhase);
+    drawGhost(100, CORRIDOR_Y, PINK_GHOST, 1, false, legPhase);
+    drawGhost(124, CORRIDOR_Y, CYAN_GHOST, 1, false, legPhase);
+    drawPacman(145, CORRIDOR_Y, 1, mouthOpen);
 
   } else {
-    // Pac-Man volta para a esquerda, agora perseguindo os fantasmas azuis.
-    int swing = (frameNo / 2) % 10;
+    // Da direita para a esquerda:
+    // fantasmas azuis na frente; Pac-Man atras perseguindo.
+    int g3 = groupX;
+    int g2 = groupX + 24;
+    int g1 = groupX + 48;
+    int pac = groupX + 82;
 
-    pacDir = -1;
-    pacX = 44 - (swing < 5 ? swing : 9 - swing);
-
-    int g1 = pacX - 34;
-    int g2 = pacX - 59;
-    int g3 = pacX - 84;
-
-    // Quando saem pela esquerda, reaparecem pela direita, simulando o tunel.
-    if (g1 < -10) g1 += 180;
-    if (g2 < -10) g2 += 180;
-    if (g3 < -10) g3 += 180;
-
-    drawPacman(pacX, corridorY, pacDir, mouthOpen);
-    drawGhost(g1, corridorY, BLUE_FRIGHT, -1, true, legPhase);
-    drawGhost(g2, corridorY, BLUE_FRIGHT, -1, true, legPhase);
-    drawGhost(g3, corridorY, BLUE_FRIGHT, -1, true, legPhase);
+    drawGhost(g3, CORRIDOR_Y, BLUE_FRIGHT, -1, true, legPhase);
+    drawGhost(g2, CORRIDOR_Y, BLUE_FRIGHT, -1, true, legPhase);
+    drawGhost(g1, CORRIDOR_Y, BLUE_FRIGHT, -1, true, legPhase);
+    drawPacman(pac, CORRIDOR_Y, -1, mouthOpen);
   }
 
-  // Uma unica transferencia SPI grande por frame.
+  // Uma unica transferencia SPI por quadro.
   tft.drawRGBBitmap(0, SCENE_Y, framebuf.getBuffer(), 160, SCENE_H);
 }
 
@@ -295,12 +280,11 @@ void setup() {
 void loop() {
   unsigned long now = millis();
 
-  updateState();
-
   if (now - lastFrame >= FRAME_MS) {
     lastFrame = now;
     frameNo++;
-    drawChaseScene();
+    updateAnimation();
+    drawScene();
     fpsFrames++;
   }
 
