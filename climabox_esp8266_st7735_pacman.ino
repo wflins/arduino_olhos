@@ -7,7 +7,9 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7735.h>
 #include <SPI.h>
-extern "C" { #include <user_interface.h> }
+extern "C" {
+  #include <user_interface.h>
+}
 
 #define TFT_CS D8
 #define TFT_RST D1
