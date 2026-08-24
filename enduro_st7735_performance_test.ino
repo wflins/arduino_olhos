@@ -23,23 +23,7 @@ unsigned long fpsStart = 0;
 uint16_t fpsFrames = 0;
 uint16_t fpsValue = 0;
 
-// Sprites simples pre-renderizados em 1 bit.
-// 16x12 carro visto de tras.
-const uint8_t PROGMEM CAR_PLAYER[] = {
-  0x03,0xC0,
-  0x07,0xE0,
-  0x0F,0xF0,
-  0x1F,0xF8,
-  0x3F,0xFC,
-  0x7F,0xFE,
-  0xFF,0xFF,
-  0xE7,0xE7,
-  0xC3,0xC3,
-  0xC3,0xC3,
-  0x81,0x81,
-  0x81,0x81
-};
-
+// Sprite simples para os adversarios.
 const uint8_t PROGMEM CAR_ENEMY[] = {
   0x03,0xC0,
   0x07,0xE0,
@@ -56,7 +40,6 @@ const uint8_t PROGMEM CAR_ENEMY[] = {
 };
 
 inline int roadLeftAt(int y) {
-  // y 0..81: horizonte estreito em cima, largo embaixo.
   return 77 - (y * 58) / (SCENE_H - 1);
 }
 
@@ -73,7 +56,6 @@ void drawRoadBase() {
   framebuf.fillScreen(sky);
   framebuf.fillRect(0, 17, 160, SCENE_H - 17, grass);
 
-  // Estrada em uma unica forma grande.
   framebuf.fillTriangle(78, 17, 18, SCENE_H - 1, 80, SCENE_H - 1, road);
   framebuf.fillTriangle(82, 17, 80, SCENE_H - 1, 142, SCENE_H - 1, road);
   framebuf.fillRect(78, 17, 5, 3, road);
@@ -86,7 +68,6 @@ void drawLaneMarkers() {
   const uint16_t yellow = ST77XX_YELLOW;
   const int phase = (frameNo * 4) % 32;
 
-  // Segmentos aumentam conforme descem, criando perspectiva.
   for (int y = 20 + phase; y < SCENE_H; y += 32) {
     int dy = y - 17;
     int w = 1 + dy / 18;
@@ -128,7 +109,6 @@ void drawBitmapScaled1bit(int x, int y, const uint8_t* bmp, int w, int h,
 }
 
 void drawEnemy() {
-  // Movimento pseudo-3D sem float.
   const uint16_t colors[3] = {
     ST77XX_RED,
     ST77XX_CYAN,
@@ -150,11 +130,63 @@ void drawEnemy() {
                        colors[(frameNo / 145) % 3], scale);
 }
 
+// Carro de Formula 1 visto de tras, desenhado em poucas primitivas.
+// Mantem o custo baixo, mas fica bem mais reconhecivel que o sprite anterior.
+void drawF1Player(int cx, int baseY) {
+  const uint16_t body = tft.color565(225, 28, 28);
+  const uint16_t bodyDark = tft.color565(150, 12, 12);
+  const uint16_t black = ST77XX_BLACK;
+  const uint16_t tire = tft.color565(20, 20, 20);
+  const uint16_t tireHi = tft.color565(75, 75, 75);
+  const uint16_t glass = tft.color565(85, 165, 225);
+  const uint16_t white = ST77XX_WHITE;
+  const uint16_t yellow = ST77XX_YELLOW;
+
+  // Oscilacao minima da suspensao para dar vida sem tremer demais.
+  int bob = ((frameNo / 5) & 1) ? 1 : 0;
+  int y = baseY + bob;
+
+  // Asa traseira larga.
+  framebuf.fillRect(cx - 18, y - 7, 36, 4, black);
+  framebuf.fillRect(cx - 15, y - 8, 30, 2, bodyDark);
+  framebuf.fillRect(cx - 17, y - 3, 4, 3, black);
+  framebuf.fillRect(cx + 13, y - 3, 4, 3, black);
+
+  // Pneus traseiros grandes.
+  framebuf.fillRoundRect(cx - 20, y - 2, 8, 16, 2, tire);
+  framebuf.fillRoundRect(cx + 12, y - 2, 8, 16, 2, tire);
+  framebuf.drawFastVLine(cx - 18, y + 1, 9, tireHi);
+  framebuf.drawFastVLine(cx + 18, y + 1, 9, tireHi);
+
+  // Corpo central e sidepods.
+  framebuf.fillTriangle(cx, y - 20, cx - 10, y + 10, cx + 10, y + 10, body);
+  framebuf.fillRect(cx - 12, y - 2, 24, 9, body);
+  framebuf.fillTriangle(cx - 12, y - 1, cx - 18, y + 7, cx - 8, y + 7, bodyDark);
+  framebuf.fillTriangle(cx + 12, y - 1, cx + 18, y + 7, cx + 8, y + 7, bodyDark);
+
+  // Cockpit / halo simplificado.
+  framebuf.fillTriangle(cx, y - 18, cx - 5, y - 7, cx + 5, y - 7, glass);
+  framebuf.drawLine(cx - 6, y - 9, cx, y - 14, black);
+  framebuf.drawLine(cx + 6, y - 9, cx, y - 14, black);
+  framebuf.drawFastHLine(cx - 5, y - 9, 11, black);
+
+  // Tampa do motor / espinha traseira.
+  framebuf.fillRect(cx - 3, y - 7, 6, 13, bodyDark);
+  framebuf.drawFastVLine(cx, y - 6, 10, white);
+
+  // Difusor e luz de chuva traseira.
+  framebuf.fillTriangle(cx - 9, y + 7, cx - 3, y + 13, cx - 1, y + 7, black);
+  framebuf.fillTriangle(cx + 9, y + 7, cx + 3, y + 13, cx + 1, y + 7, black);
+  framebuf.fillRect(cx - 2, y + 8, 4, 3, black);
+  if (((frameNo / 6) & 1) == 0) framebuf.fillRect(cx - 1, y + 8, 2, 2, yellow);
+
+  // Pequenos destaques para dar volume ao carro.
+  framebuf.drawFastHLine(cx - 9, y, 7, white);
+  framebuf.drawFastHLine(cx + 3, y, 7, white);
+}
+
 void drawPlayer() {
-  // Jogador quase fixo; leve oscilacao de 1 px para dar vida.
-  int bob = ((frameNo / 4) & 1) ? 1 : 0;
-  drawBitmapScaled1bit(64, SCENE_H - 25 + bob, CAR_PLAYER, 16, 12,
-                       ST77XX_WHITE, 2);
+  drawF1Player(80, SCENE_H - 17);
 }
 
 void renderFrame() {
@@ -197,7 +229,6 @@ void loop() {
   unsigned long now = millis();
 
   if (now - lastFrame >= FRAME_MS) {
-    // Evita acumular atraso se um frame demorar demais.
     lastFrame = now;
     frameNo++;
     renderFrame();
