@@ -92,10 +92,16 @@ void atualizarOrientacao(){
   if(!lerADXL())return;
 
   uint8_t d=rotacaoAtual;
-  int ax=abs(accelX), ay=abs(accelY);
-  if(ax<ORIENTATION_THRESHOLD && ay<ORIENTATION_THRESHOLD)return;
+  int ax=abs(accelX), ay=abs(accelY), az=abs(accelZ);
 
-  if(ax>ay){
+  if(ax<ORIENTATION_THRESHOLD && ay<ORIENTATION_THRESHOLD && az<ORIENTATION_THRESHOLD)return;
+
+  // O sensor foi montado em uma face do cubo. Quando ele fica na base,
+  // a gravidade aparece principalmente no eixo Z. Nesse caso precisamos
+  // tratar Z explicitamente; caso contrario a tela mantinha a rotacao anterior.
+  if(az>ax && az>ay){
+    d=(accelZ>0)?0:2;
+  }else if(ax>ay){
     d=(accelX>0)?2:0;
   }else{
     d=(accelY>0)?1:3;
