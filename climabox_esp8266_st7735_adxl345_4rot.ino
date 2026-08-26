@@ -1,3 +1,4 @@
+// ClimaBox 4 rotacoes + ADXL345 - fonte limpa para Arduino IDE
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
 #include <WiFiClientSecureBearSSL.h>
@@ -53,7 +54,6 @@ int16_t accelX=0, accelY=0, accelZ=0;
 uint8_t rotacaoAtual=1, rotacaoCandidata=1;
 unsigned long ultimaLeituraAdxl=0, inicioRotacaoCandidata=0;
 
-// QR estatico para WIFI:T:WPA;S:ClimaBox-Setup;P:climabox;;
 const char* QR_WIFI[29] = {
 "11111110000110100101001111111","10000010011001100110101000001","10111010000010100000101011101",
 "10111010100011001101101011101","10111010110001101011001011101","10000010000110001000001000001",
@@ -85,14 +85,31 @@ bool lerADXL(){uint8_t b[6];if(!adxlRead(0x32,b,6))return false;accelX=(int16_t)
 void mostrarTelaAtual();
 void aplicarRotacao(uint8_t r){if(r==rotacaoAtual)return;rotacaoAtual=r;tft.setRotation(r);telaLimpa();mostrarTelaAtual();}
 void atualizarOrientacao(){
-  if(!adxlOk)return;unsigned long a=millis();if(a-ultimaLeituraAdxl<ADXL_INTERVAL)return;ultimaLeituraAdxl=a;if(!lerADXL())return;
-  uint8_t d=rotacaoAtual;int ax=abs(accelX), ay=abs(accelY);
+  if(!adxlOk)return;
+  unsigned long a=millis();
+  if(a-ultimaLeituraAdxl<ADXL_INTERVAL)return;
+  ultimaLeituraAdxl=a;
+  if(!lerADXL())return;
+
+  uint8_t d=rotacaoAtual;
+  int ax=abs(accelX), ay=abs(accelY);
   if(ax<ORIENTATION_THRESHOLD && ay<ORIENTATION_THRESHOLD)return;
-  // Nesta montagem fisica do ADXL345, as duas orientacoes verticais
-  // correspondem a rotacoes 2 e 0 (invertidas em relacao ao mapeamento inicial).
-  if(ax>ay){ d=(accelX>0)?2:0; } else { d=(accelY>0)?1:3; }
-  if(d!=rotacaoCandidata){rotacaoCandidata=d;inicioRotacaoCandidata=a;return;}
-  if(d!=rotacaoAtual && a-inicioRotacaoCandidata>=ORIENTATION_STABLE_MS)aplicarRotacao(d);
+
+  if(ax>ay){
+    d=(accelX>0)?2:0;
+  }else{
+    d=(accelY>0)?1:3;
+  }
+
+  if(d!=rotacaoCandidata){
+    rotacaoCandidata=d;
+    inicioRotacaoCandidata=a;
+    return;
+  }
+
+  if(d!=rotacaoAtual && a-inicioRotacaoCandidata>=ORIENTATION_STABLE_MS){
+    aplicarRotacao(d);
+  }
 }
 
 bool salvarConfig(){DynamicJsonDocument d(384);d["cidade"]=cidade;d["uf"]=uf;d["latitude"]=latitude;d["longitude"]=longitude;d["coords_ok"]=coordenadasValidas;File f=LittleFS.open(CONFIG_FILE,"w");if(!f)return false;serializeJson(d,f);f.close();return true;}
@@ -170,17 +187,26 @@ void setup(){
 void loop(){
   verificarBotaoConfig();
   atualizarOrientacao();
+
   unsigned long a=millis();
+
   if(WiFi.status()!=WL_CONNECTED){
     if(a-ultimaTentativaWifi>30000UL){
       ultimaTentativaWifi=a;
       WiFi.reconnect();
     }
   }
+
   if(a-ultimaConsulta>=WEATHER_INTERVAL){
     ultimaConsulta=a;
-    if(WiFi.status()==WL_CONNECTED)atualizarDados();
+    if(WiFi.status()==WL_CONNECTED){
+      atualizarDados();
+    }
   }
-  if(a-ultimaTrocaTela>=SCREEN_INTERVAL)proximaTela();
+
+  if(a-ultimaTrocaTela>=SCREEN_INTERVAL){
+    proximaTela();
+  }
+
   delay(20);
 }
