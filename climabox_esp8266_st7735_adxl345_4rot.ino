@@ -88,7 +88,9 @@ void atualizarOrientacao(){
   if(!adxlOk)return;unsigned long a=millis();if(a-ultimaLeituraAdxl<ADXL_INTERVAL)return;ultimaLeituraAdxl=a;if(!lerADXL())return;
   uint8_t d=rotacaoAtual;int ax=abs(accelX), ay=abs(accelY);
   if(ax<ORIENTATION_THRESHOLD && ay<ORIENTATION_THRESHOLD)return;
-  if(ax>ay){ d=(accelX>0)?0:2; } else { d=(accelY>0)?1:3; }
+  // Nesta montagem fisica do ADXL345, as duas orientacoes verticais
+  // correspondem a rotacoes 2 e 0 (invertidas em relacao ao mapeamento inicial).
+  if(ax>ay){ d=(accelX>0)?2:0; } else { d=(accelY>0)?1:3; }
   if(d!=rotacaoCandidata){rotacaoCandidata=d;inicioRotacaoCandidata=a;return;}
   if(d!=rotacaoAtual && a-inicioRotacaoCandidata>=ORIENTATION_STABLE_MS)aplicarRotacao(d);
 }
