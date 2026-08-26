@@ -97,12 +97,12 @@ void atualizarOrientacao(){
   if(ax<ORIENTATION_THRESHOLD && ay<ORIENTATION_THRESHOLD && az<ORIENTATION_THRESHOLD)return;
 
   // O sensor foi montado em uma face do cubo. Quando ele fica na base,
-  // a gravidade aparece principalmente no eixo Z. Nesse caso precisamos
-  // tratar Z explicitamente; caso contrario a tela mantinha a rotacao anterior.
+  // a gravidade aparece principalmente no eixo Z. As duas orientacoes
+  // verticais usam o mapeamento 0/2 corrigido para a montagem real.
   if(az>ax && az>ay){
-    d=(accelZ>0)?0:2;
+    d=(accelZ>0)?2:0;
   }else if(ax>ay){
-    d=(accelX>0)?2:0;
+    d=(accelX>0)?0:2;
   }else{
     d=(accelY>0)?1:3;
   }
