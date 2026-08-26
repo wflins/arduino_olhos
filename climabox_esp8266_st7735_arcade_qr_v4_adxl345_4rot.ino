@@ -109,14 +109,17 @@ void atualizarOrientacao(){
   if(!lerADXL345())return;
 
   uint8_t desejada=rotacaoAtual;
-  int16_t ax=abs(accelX), ay=abs(accelY);
+  int16_t ax=abs(accelX), ay=abs(accelY), az=abs(accelZ);
 
-  // O eixo com maior componente de gravidade decide portrait/landscape.
-  // Se 0/2 ficarem invertidos no seu modulo, troque apenas essas duas atribuicoes.
-  if(ax>ay && ax>ORIENTATION_THRESHOLD){
+  // Considera os tres eixos. X/Y mantem exatamente o comportamento anterior.
+  // Quando Z domina, o ADXL345 esta na base/topo do cubo. Nessa montagem
+  // a tela precisa ficar em retrato; cada sinal de Z representa uma das duas faces.
+  if(ax>=ay && ax>=az && ax>ORIENTATION_THRESHOLD){
     desejada=(accelX>0)?0:2;
-  } else if(ay>ax && ay>ORIENTATION_THRESHOLD){
+  } else if(ay>=ax && ay>=az && ay>ORIENTATION_THRESHOLD){
     desejada=(accelY>0)?1:3;
+  } else if(az>=ax && az>=ay && az>ORIENTATION_THRESHOLD){
+    desejada=(accelZ>0)?0:2;
   } else return;
 
   if(desejada!=rotacaoCandidata){rotacaoCandidata=desejada;inicioRotacaoCandidata=agora;return;}
@@ -240,12 +243,14 @@ void verificarBotaoConfig(){if(digitalRead(CONFIG_BUTTON)!=LOW)return;unsigned l
 
 void setup(){
   Serial.begin(115200);pinMode(CONFIG_BUTTON,INPUT_PULLUP);tft.initR(INITR_BLACKTAB);tft.setRotation(rotacaoAtual);telaLimpa();determinarModoInicial();LittleFS.begin();carregarConfig();
-  adxlOk=iniciarADXL345();Serial.println(adxlOk?"ADXL345 OK - 4 rotacoes":"ADXL345 nao encontrado - orientacao automatica desativada");
+  adxlOk=iniciarADXL345();Serial.println(adxlOk?"ADXL345 OK - 6 posicoes":"ADXL345 nao encontrado - orientacao automatica desativada");
   if(adxlOk && lerADXL345()){
-    // Determina a orientacao inicial antes de desenhar a interface.
-    int16_t ax=abs(accelX),ay=abs(accelY);
-    if(ax>ay && ax>ORIENTATION_THRESHOLD)rotacaoAtual=(accelX>0)?0:2;
-    else if(ay>ORIENTATION_THRESHOLD)rotacaoAtual=(accelY>0)?1:3;
+    // Determina a orientacao inicial antes de desenhar a interface, inclusive
+    // quando o eixo Z esta apontando para cima/baixo (sensor na base/topo do cubo).
+    int16_t ax=abs(accelX),ay=abs(accelY),az=abs(accelZ);
+    if(ax>=ay && ax>=az && ax>ORIENTATION_THRESHOLD)rotacaoAtual=(accelX>0)?0:2;
+    else if(ay>=ax && ay>=az && ay>ORIENTATION_THRESHOLD)rotacaoAtual=(accelY>0)?1:3;
+    else if(az>=ax && az>=ay && az>ORIENTATION_THRESHOLD)rotacaoAtual=(accelZ>0)?0:2;
     rotacaoCandidata=rotacaoAtual;tft.setRotation(rotacaoAtual);
   }
   bool ok=conectarWifi(modoAtual==MODO_CLIMA);if(modoAtual==MODO_CLIMA&&ok)buscarClima();prepararModo();
