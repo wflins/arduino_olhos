@@ -45,6 +45,7 @@ float aqi=NAN, pm25=NAN, pm10=NAN, co=NAN, no2=NAN, so2=NAN;
 float ozonio=NAN, aerosol=NAN, poeira=NAN, uv=NAN; String airTime="";
 
 unsigned long ultimaConsulta=0, ultimaTrocaTela=0;
+unsigned long ultimaTentativaWifi=0;
 uint8_t telaAtual=0;
 
 bool adxlOk=false;
@@ -126,7 +127,7 @@ void mostrarClima(){
 }
 
 void mostrarAtmosfera(){cabecalho("ATMOSFERA",ST77XX_CYAN);int y=retrato()?30:35,dy=retrato()?19:15;valorLinha(y,"Umidade      ",umidade,"%");valorLinha(y+=dy,"Pressao      ",pressao," hPa");valorLinha(y+=dy,"Nuvens       ",nuvens,"%");valorLinha(y+=dy,"Visibilidade ",isnan(visibilidade)?NAN:visibilidade/1000.0f," km",ST77XX_WHITE,1);valorLinha(y+=dy,"Precipitacao ",precipitacao," mm",ST77XX_WHITE,1);valorLinha(y+=dy,"Rajadas      ",rajada," km/h");rodape(horaISO(weatherTime));}
-void mostrarQualidadeAr(){cabecalho("QUALIDADE AR",corAQI(aqi));int y=retrato()?30:34;texto(5,y,"AQI "+(isnan(aqi)?String("--"):String(aqi,0)),corAQI(aqi),retrato()?2:2);texto(retrato()?5:86,y+(retrato()?23:4),descricaoAQI(aqi),corAQI(aqi));int yy=retrato()?78:62,dy=retrato()?18:15;valorLinha(yy,"PM2.5  ",pm25," ug/m3",ST77XX_WHITE,1);valorLinha(yy+=dy,"PM10   ",pm10," ug/m3",ST77XX_WHITE,1);valorLinha(yy+=dy,"Ozonio ",ozonio," ug/m3",ST77XX_WHITE,1);valorLinha(yy+=dy,"UV     ",uv,"",ST77XX_WHITE,1);rodape(horaISO(airTime));}
+void mostrarQualidadeAr(){cabecalho("QUALIDADE AR",corAQI(aqi));int y=retrato()?30:34;texto(5,y,"AQI "+(isnan(aqi)?String("--"):String(aqi,0)),corAQI(aqi),2);texto(retrato()?5:86,y+(retrato()?23:4),descricaoAQI(aqi),corAQI(aqi));int yy=retrato()?78:62,dy=retrato()?18:15;valorLinha(yy,"PM2.5  ",pm25," ug/m3",ST77XX_WHITE,1);valorLinha(yy+=dy,"PM10   ",pm10," ug/m3",ST77XX_WHITE,1);valorLinha(yy+=dy,"Ozonio ",ozonio," ug/m3",ST77XX_WHITE,1);valorLinha(yy+=dy,"UV     ",uv,"",ST77XX_WHITE,1);rodape(horaISO(airTime));}
 void mostrarPoluentes(){cabecalho("FUMACA / AR",ST77XX_YELLOW);String f=nivelFumaca();uint16_t cf=f=="ALTA"?ST77XX_RED:(f=="MODERADA"?ST77XX_YELLOW:ST77XX_GREEN);texto(5,retrato()?31:34,"Fumaca: "+f,cf);int y=retrato()?55:52,dy=retrato()?18:14;valorLinha(y,"CO      ",co," ug/m3");valorLinha(y+=dy,"NO2     ",no2," ug/m3",ST77XX_WHITE,1);valorLinha(y+=dy,"SO2     ",so2," ug/m3",ST77XX_WHITE,1);valorLinha(y+=dy,"Aerosol ",aerosol,"",ST77XX_WHITE,2);valorLinha(y+=dy,"Poeira  ",poeira," ug/m3",ST77XX_WHITE,1);rodape(horaISO(airTime));}
 void mostrarTelaAtual(){switch(telaAtual){case 0:mostrarClima();break;case 1:mostrarAtmosfera();break;case 2:mostrarQualidadeAr();break;case 3:mostrarPoluentes();break;default:telaAtual=0;mostrarClima();}}
 void proximaTela(){telaAtual=(telaAtual+1)%TOTAL_SCREENS;ultimaTrocaTela=millis();mostrarTelaAtual();}
@@ -137,5 +138,47 @@ void atualizarDados(){if(WiFi.status()!=WL_CONNECTED)return;cabecalho("CLIMABOX"
 
 void verificarBotaoConfig(){if(digitalRead(CONFIG_BUTTON)!=LOW)return;unsigned long ini=millis();while(digitalRead(CONFIG_BUTTON)==LOW){if(millis()-ini>=BUTTON_HOLD_TIME){abrirPortalConfiguracao();ultimaConsulta=0;telaAtual=0;atualizarDados();return;}delay(30);yield();}}
 
-void setup(){Serial.begin(115200);delay(100);pinMode(CONFIG_BUTTON,INPUT_PULLUP);tft.initR(INITR_BLACKTAB);tft.setRotation(rotacaoAtual);tft.setTextWrap(false);telaLimpa();adxlOk=iniciarADXL();Serial.println(adxlOk?"ADXL345 OK - rotacao automatica ativa":"ADXL345 nao encontrado");LittleFS.begin();carregarConfig();if(!conectarWifiSalvo()){if(!abrirPortalConfiguracao()){cabecalho("SEM WIFI",ST77XX_RED);return;}}if(!coordenadasValidas&&!geocodificarCidade()){cabecalho("CIDADE",ST77XX_RED);return;}telaAtual=0;atualizarDados();ultimaConsulta=ultimaTrocaTela=millis();}
-void loop(){verificarBotaoConfig();atualizarOrientacao();unsigned long a=millis();if(WiFi.status()!=WL_CONNECTED){static unsigned long uw=0;if(a-uw>30000UL){uw=a;WiFi.reconnect();}}if(a-ultimaConsulta>=WEATHER_INTERVAL){ultimaConsulta=a;if(WiFi.status()==WL_CONNECTED)atualizarDados();}if(a-ultimaTrocaTela>=SCREEN_INTERVAL)proximaTela();delay(20);}
+void setup(){
+  Serial.begin(115200);
+  delay(100);
+  pinMode(CONFIG_BUTTON,INPUT_PULLUP);
+  tft.initR(INITR_BLACKTAB);
+  tft.setRotation(rotacaoAtual);
+  tft.setTextWrap(false);
+  telaLimpa();
+  adxlOk=iniciarADXL();
+  Serial.println(adxlOk?"ADXL345 OK - rotacao automatica ativa":"ADXL345 nao encontrado");
+  LittleFS.begin();
+  carregarConfig();
+  if(!conectarWifiSalvo()){
+    if(!abrirPortalConfiguracao()){
+      cabecalho("SEM WIFI",ST77XX_RED);
+      return;
+    }
+  }
+  if(!coordenadasValidas&&!geocodificarCidade()){
+    cabecalho("CIDADE",ST77XX_RED);
+    return;
+  }
+  telaAtual=0;
+  atualizarDados();
+  ultimaConsulta=ultimaTrocaTela=millis();
+}
+
+void loop(){
+  verificarBotaoConfig();
+  atualizarOrientacao();
+  unsigned long a=millis();
+  if(WiFi.status()!=WL_CONNECTED){
+    if(a-ultimaTentativaWifi>30000UL){
+      ultimaTentativaWifi=a;
+      WiFi.reconnect();
+    }
+  }
+  if(a-ultimaConsulta>=WEATHER_INTERVAL){
+    ultimaConsulta=a;
+    if(WiFi.status()==WL_CONNECTED)atualizarDados();
+  }
+  if(a-ultimaTrocaTela>=SCREEN_INTERVAL)proximaTela();
+  delay(20);
+}
