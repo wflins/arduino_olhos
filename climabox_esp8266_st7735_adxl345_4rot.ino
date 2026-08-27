@@ -9,6 +9,7 @@
 #include <Adafruit_ST7735.h>
 #include <SPI.h>
 #include <Wire.h>
+#include <time.h>
 
 #define TFT_CS   D8
 #define TFT_RST  D1
@@ -33,7 +34,7 @@ const unsigned long BUTTON_HOLD_TIME = 5000UL;
 const unsigned long ADXL_INTERVAL = 100UL;
 const unsigned long ORIENTATION_STABLE_MS = 650UL;
 const int16_t ORIENTATION_THRESHOLD = 135;
-const uint8_t TOTAL_SCREENS = 4;
+const uint8_t TOTAL_SCREENS = 5;
 
 String cidade = "Manaus", uf = "AM";
 float latitude = -3.1190f, longitude = -60.0217f;
@@ -44,9 +45,12 @@ float pressao=NAN, precipitacao=NAN, nuvens=NAN, visibilidade=NAN;
 int weatherCode=-1; bool isDay=true; String weatherTime="";
 float aqi=NAN, pm25=NAN, pm10=NAN, co=NAN, no2=NAN, so2=NAN;
 float ozonio=NAN, aerosol=NAN, poeira=NAN, uv=NAN; String airTime="";
+long timezoneOffsetSeconds = -4L * 3600L;
 
 unsigned long ultimaConsulta=0, ultimaTrocaTela=0;
 unsigned long ultimaTentativaWifi=0;
+unsigned long ultimaAtualizacaoRelogio=0;
+int ultimoMinutoRelogio=-1;
 uint8_t telaAtual=0;
 
 bool adxlOk=false;
@@ -83,7 +87,7 @@ bool iniciarADXL(){Wire.begin(ADXL_SDA,ADXL_SCL);Wire.setClock(100000);delay(10)
 bool lerADXL(){uint8_t b[6];if(!adxlRead(0x32,b,6))return false;accelX=(int16_t)(((uint16_t)b[1]<<8)|b[0]);accelY=(int16_t)(((uint16_t)b[3]<<8)|b[2]);accelZ=(int16_t)(((uint16_t)b[5]<<8)|b[4]);return true;}
 
 void mostrarTelaAtual();
-void aplicarRotacao(uint8_t r){if(r==rotacaoAtual)return;rotacaoAtual=r;tft.setRotation(r);telaLimpa();mostrarTelaAtual();}
+void aplicarRotacao(uint8_t r){if(r==rotacaoAtual)return;rotacaoAtual=r;tft.setRotation(r);telaLimpa();ultimoMinutoRelogio=-1;mostrarTelaAtual();}
 void atualizarOrientacao(){
   if(!adxlOk)return;
   unsigned long a=millis();
@@ -93,7 +97,6 @@ void atualizarOrientacao(){
 
   uint8_t d=rotacaoAtual;
   int ax=abs(accelX), ay=abs(accelY), az=abs(accelZ);
-
   if(ax<ORIENTATION_THRESHOLD && ay<ORIENTATION_THRESHOLD && az<ORIENTATION_THRESHOLD)return;
 
   if(az>ax && az>ay){
@@ -152,29 +155,113 @@ void desenharIconeCalorExtremo(int cx,int cy){
   tft.drawLine(cx+16,cy-28,cx+19,cy-24,calor);
 
   tft.fillCircle(cx,cy-6,12,pele);
-
   tft.drawLine(cx-7,cy-10,cx-3,cy-6,ST77XX_BLACK);
   tft.drawLine(cx-7,cy-6,cx-3,cy-10,ST77XX_BLACK);
   tft.drawLine(cx+3,cy-10,cx+7,cy-6,ST77XX_BLACK);
   tft.drawLine(cx+3,cy-6,cx+7,cy-10,ST77XX_BLACK);
-
   tft.fillRoundRect(cx-5,cy-2,10,6,2,boca);
   tft.fillRoundRect(cx-2,cy+2,5,7,2,lingua);
-
   tft.fillCircle(cx+12,cy-14,2,suor);
   tft.drawPixel(cx+12,cy-17,suor);
   tft.drawPixel(cx+11,cy-16,suor);
   tft.drawPixel(cx+13,cy-16,suor);
-
   tft.fillRoundRect(cx-5,cy+8,10,8,2,roupa);
   tft.drawLine(cx-5,cy+10,cx-12,cy+16,cont);
   tft.drawLine(cx+5,cy+10,cx+12,cy+16,cont);
   tft.drawLine(cx-2,cy+16,cx-8,cy+28,cont);
   tft.drawLine(cx+2,cy+16,cx+7,cy+28,cont);
-
   tft.drawFastHLine(cx-14,cy+31,25,calor);
   tft.drawPixel(cx-15,cy+30,calor);
   tft.drawPixel(cx+11,cy+30,calor);
+}
+
+void desenharFlipDigito(int x,int y,int w,int h,char digito){
+  uint16_t topo=tft.color565(55,55,60);
+  uint16_t baixo=tft.color565(38,38,42);
+  uint16_t borda=tft.color565(95,95,100);
+  tft.fillRoundRect(x,y,w,h,4,baixo);
+  tft.fillRoundRect(x+1,y+1,w-2,h/2,3,topo);
+  tft.drawRoundRect(x,y,w,h,4,borda);
+  tft.drawFastHLine(x+2,y+h/2,w-4,ST77XX_BLACK);
+  String s=String(digito);
+  uint8_t tam=retrato()?3:4;
+  int tw=6*tam;
+  int th=8*tam;
+  tft.setTextSize(tam);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setCursor(x+(w-tw)/2,y+(h-th)/2+1);
+  tft.print(s);
+}
+
+bool obterHoraLocal(struct tm &tmLocal){
+  time_t agora=time(nullptr);
+  if(agora<100000)return false;
+  agora+=timezoneOffsetSeconds;
+  gmtime_r(&agora,&tmLocal);
+  return true;
+}
+
+void mostrarRelogio(){
+  telaLimpa();
+  struct tm tmLocal;
+  if(!obterHoraLocal(tmLocal)){
+    texto(5,5,"RELOGIO",ST77XX_CYAN,retrato()?1:2);
+    texto(5,retrato()?70:55,"Sincronizando hora...",ST77XX_YELLOW);
+    ultimoMinutoRelogio=-1;
+    return;
+  }
+
+  char hhmm[5];
+  snprintf(hhmm,sizeof(hhmm),"%02d%02d",tmLocal.tm_hour,tmLocal.tm_min);
+  char data[16];
+  snprintf(data,sizeof(data),"%02d/%02d/%04d",tmLocal.tm_mday,tmLocal.tm_mon+1,tmLocal.tm_year+1900);
+
+  texto(5,5,"FLIP CLOCK",ST77XX_CYAN,retrato()?1:2);
+  uint16_t cinza=tft.color565(90,90,95);
+  tft.drawFastHLine(0,retrato()?18:24,W(),cinza);
+
+  if(retrato()){
+    int w=26,h=48,g=4;
+    int total=4*w+3*g;
+    int x=(W()-total)/2;
+    int y=39;
+    for(int i=0;i<4;i++)desenharFlipDigito(x+i*(w+g),y,w,h,hhmm[i]);
+    // dois pontos discretos entre horas e minutos
+    int cx=x+2*(w+g)-g/2-1;
+    tft.fillCircle(cx,y+17,2,ST77XX_YELLOW);
+    tft.fillCircle(cx,y+31,2,ST77XX_YELLOW);
+    texto((W()-60)/2,101,String(data),tft.color565(180,180,180));
+    String local=cidade+(uf.length()?" - "+uf:"");
+    if(local.length()>18)local=local.substring(0,18);
+    texto(5,123,local,ST77XX_GREEN);
+  }else{
+    int w=30,h=55,g=6;
+    int total=4*w+3*g;
+    int x=(W()-total)/2;
+    int y=37;
+    for(int i=0;i<4;i++)desenharFlipDigito(x+i*(w+g),y,w,h,hhmm[i]);
+    int cx=x+2*(w+g)-g/2-1;
+    tft.fillCircle(cx,y+20,2,ST77XX_YELLOW);
+    tft.fillCircle(cx,y+36,2,ST77XX_YELLOW);
+    texto(5,103,String(data),tft.color565(180,180,180));
+    String local=cidade+(uf.length()?" - "+uf:"");
+    if(local.length()>19)local=local.substring(0,19);
+    texto(W()-6*(local.length())-5,103,local,ST77XX_GREEN);
+  }
+  ultimoMinutoRelogio=tmLocal.tm_min;
+}
+
+void atualizarRelogioSeNecessario(){
+  if(telaAtual!=4)return;
+  unsigned long agoraMs=millis();
+  if(agoraMs-ultimaAtualizacaoRelogio<1000UL)return;
+  ultimaAtualizacaoRelogio=agoraMs;
+  struct tm tmLocal;
+  if(!obterHoraLocal(tmLocal)){
+    if(ultimoMinutoRelogio!=-2){mostrarRelogio();ultimoMinutoRelogio=-2;}
+    return;
+  }
+  if(tmLocal.tm_min!=ultimoMinutoRelogio)mostrarRelogio();
 }
 
 void mostrarClima(){
@@ -198,10 +285,10 @@ void mostrarClima(){
 void mostrarAtmosfera(){cabecalho("ATMOSFERA",ST77XX_CYAN);int y=retrato()?30:35,dy=retrato()?19:15;valorLinha(y,"Umidade      ",umidade,"%");valorLinha(y+=dy,"Pressao      ",pressao," hPa");valorLinha(y+=dy,"Nuvens       ",nuvens,"%");valorLinha(y+=dy,"Visibilidade ",isnan(visibilidade)?NAN:visibilidade/1000.0f," km",ST77XX_WHITE,1);valorLinha(y+=dy,"Precipitacao ",precipitacao," mm",ST77XX_WHITE,1);valorLinha(y+=dy,"Rajadas      ",rajada," km/h");rodape(horaISO(weatherTime));}
 void mostrarQualidadeAr(){cabecalho("QUALIDADE AR",corAQI(aqi));int y=retrato()?30:34;texto(5,y,"AQI "+(isnan(aqi)?String("--"):String(aqi,0)),corAQI(aqi),2);texto(retrato()?5:86,y+(retrato()?23:4),descricaoAQI(aqi),corAQI(aqi));int yy=retrato()?78:62,dy=retrato()?18:15;valorLinha(yy,"PM2.5  ",pm25," ug/m3",ST77XX_WHITE,1);valorLinha(yy+=dy,"PM10   ",pm10," ug/m3",ST77XX_WHITE,1);valorLinha(yy+=dy,"Ozonio ",ozonio," ug/m3",ST77XX_WHITE,1);valorLinha(yy+=dy,"UV     ",uv,"",ST77XX_WHITE,1);rodape(horaISO(airTime));}
 void mostrarPoluentes(){cabecalho("FUMACA / AR",ST77XX_YELLOW);String f=nivelFumaca();uint16_t cf=f=="ALTA"?ST77XX_RED:(f=="MODERADA"?ST77XX_YELLOW:ST77XX_GREEN);texto(5,retrato()?31:34,"Fumaca: "+f,cf);int y=retrato()?55:52,dy=retrato()?18:14;valorLinha(y,"CO      ",co," ug/m3");valorLinha(y+=dy,"NO2     ",no2," ug/m3",ST77XX_WHITE,1);valorLinha(y+=dy,"SO2     ",so2," ug/m3",ST77XX_WHITE,1);valorLinha(y+=dy,"Aerosol ",aerosol,"",ST77XX_WHITE,2);valorLinha(y+=dy,"Poeira  ",poeira," ug/m3",ST77XX_WHITE,1);rodape(horaISO(airTime));}
-void mostrarTelaAtual(){switch(telaAtual){case 0:mostrarClima();break;case 1:mostrarAtmosfera();break;case 2:mostrarQualidadeAr();break;case 3:mostrarPoluentes();break;default:telaAtual=0;mostrarClima();}}
-void proximaTela(){telaAtual=(telaAtual+1)%TOTAL_SCREENS;ultimaTrocaTela=millis();mostrarTelaAtual();}
+void mostrarTelaAtual(){switch(telaAtual){case 0:mostrarClima();break;case 1:mostrarAtmosfera();break;case 2:mostrarQualidadeAr();break;case 3:mostrarPoluentes();break;case 4:mostrarRelogio();break;default:telaAtual=0;mostrarClima();}}
+void proximaTela(){telaAtual=(telaAtual+1)%TOTAL_SCREENS;ultimaTrocaTela=millis();ultimoMinutoRelogio=-1;mostrarTelaAtual();}
 
-bool buscarClima(){if(WiFi.status()!=WL_CONNECTED||!coordenadasValidas)return false;BearSSL::WiFiClientSecure cl;cl.setInsecure();cl.setBufferSizes(2048,512);HTTPClient http;String url="https://api.open-meteo.com/v1/forecast?latitude="+String(latitude,5)+"&longitude="+String(longitude,5)+"&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,is_day,wind_speed_10m,wind_gusts_10m,surface_pressure,precipitation,cloud_cover,visibility&timezone=auto";if(!http.begin(cl,url))return false;http.setTimeout(12000);http.useHTTP10(true);int code=http.GET();if(code!=HTTP_CODE_OK){http.end();return false;}DynamicJsonDocument d(4096);auto er=deserializeJson(d,http.getStream());http.end();if(er)return false;JsonObject a=d["current"];temperatura=a["temperature_2m"]|NAN;umidade=a["relative_humidity_2m"]|NAN;sensacao=a["apparent_temperature"]|NAN;weatherCode=a["weather_code"]|-1;isDay=(a["is_day"]|1)==1;vento=a["wind_speed_10m"]|NAN;rajada=a["wind_gusts_10m"]|NAN;pressao=a["surface_pressure"]|NAN;precipitacao=a["precipitation"]|NAN;nuvens=a["cloud_cover"]|NAN;visibilidade=a["visibility"]|NAN;weatherTime=String((const char*)(a["time"]|""));return true;}
+bool buscarClima(){if(WiFi.status()!=WL_CONNECTED||!coordenadasValidas)return false;BearSSL::WiFiClientSecure cl;cl.setInsecure();cl.setBufferSizes(2048,512);HTTPClient http;String url="https://api.open-meteo.com/v1/forecast?latitude="+String(latitude,5)+"&longitude="+String(longitude,5)+"&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,is_day,wind_speed_10m,wind_gusts_10m,surface_pressure,precipitation,cloud_cover,visibility&timezone=auto";if(!http.begin(cl,url))return false;http.setTimeout(12000);http.useHTTP10(true);int code=http.GET();if(code!=HTTP_CODE_OK){http.end();return false;}DynamicJsonDocument d(4096);auto er=deserializeJson(d,http.getStream());http.end();if(er)return false;timezoneOffsetSeconds=d["utc_offset_seconds"]|timezoneOffsetSeconds;JsonObject a=d["current"];temperatura=a["temperature_2m"]|NAN;umidade=a["relative_humidity_2m"]|NAN;sensacao=a["apparent_temperature"]|NAN;weatherCode=a["weather_code"]|-1;isDay=(a["is_day"]|1)==1;vento=a["wind_speed_10m"]|NAN;rajada=a["wind_gusts_10m"]|NAN;pressao=a["surface_pressure"]|NAN;precipitacao=a["precipitation"]|NAN;nuvens=a["cloud_cover"]|NAN;visibilidade=a["visibility"]|NAN;weatherTime=String((const char*)(a["time"]|""));return true;}
 bool buscarAr(){if(WiFi.status()!=WL_CONNECTED||!coordenadasValidas)return false;BearSSL::WiFiClientSecure cl;cl.setInsecure();cl.setBufferSizes(2048,512);HTTPClient http;String url="https://air-quality-api.open-meteo.com/v1/air-quality?latitude="+String(latitude,5)+"&longitude="+String(longitude,5)+"&current=us_aqi,pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone,aerosol_optical_depth,dust,uv_index&timezone=auto";if(!http.begin(cl,url))return false;http.setTimeout(12000);http.useHTTP10(true);int code=http.GET();if(code!=HTTP_CODE_OK){http.end();return false;}DynamicJsonDocument d(4096);auto er=deserializeJson(d,http.getStream());http.end();if(er)return false;JsonObject a=d["current"];aqi=a["us_aqi"]|NAN;pm10=a["pm10"]|NAN;pm25=a["pm2_5"]|NAN;co=a["carbon_monoxide"]|NAN;no2=a["nitrogen_dioxide"]|NAN;so2=a["sulphur_dioxide"]|NAN;ozonio=a["ozone"]|NAN;aerosol=a["aerosol_optical_depth"]|NAN;poeira=a["dust"]|NAN;uv=a["uv_index"]|NAN;airTime=String((const char*)(a["time"]|""));return true;}
 void atualizarDados(){if(WiFi.status()!=WL_CONNECTED)return;cabecalho("CLIMABOX");texto(5,retrato()?35:42,"Atualizando clima...");bool c=buscarClima();texto(5,retrato()?53:62,"Atualizando ar...");bool a=buscarAr();Serial.printf("Atualizacao clima=%s ar=%s\n",c?"OK":"ERRO",a?"OK":"ERRO");mostrarTelaAtual();ultimaTrocaTela=millis();}
 
@@ -229,6 +316,7 @@ void setup(){
     cabecalho("CIDADE",ST77XX_RED);
     return;
   }
+  configTime(0,0,"pool.ntp.org","time.nist.gov");
   telaAtual=0;
   atualizarDados();
   ultimaConsulta=ultimaTrocaTela=millis();
@@ -237,6 +325,7 @@ void setup(){
 void loop(){
   verificarBotaoConfig();
   atualizarOrientacao();
+  atualizarRelogioSeNecessario();
 
   unsigned long a=millis();
 
