@@ -96,9 +96,6 @@ void atualizarOrientacao(){
 
   if(ax<ORIENTATION_THRESHOLD && ay<ORIENTATION_THRESHOLD && az<ORIENTATION_THRESHOLD)return;
 
-  // O sensor foi montado em uma face do cubo. Quando ele fica na base,
-  // a gravidade aparece principalmente no eixo Z. As duas orientacoes
-  // verticais usam o mapeamento 0/2 corrigido para a montagem real.
   if(az>ax && az>ay){
     d=(accelZ>0)?2:0;
   }else if(ax>ay){
@@ -138,40 +135,62 @@ String nivelFumaca(){if(isnan(pm25)&&isnan(aerosol))return"Sem dados";if((!isnan
 
 void desenharIconeClima(int code,bool dia,int cx,int cy){uint16_t br=tft.color565(200,205,210);if(code<=1){if(dia){tft.fillCircle(cx,cy,9,ST77XX_YELLOW);for(int i=0;i<8;i++){float a=i*PI/4;tft.drawLine(cx+cos(a)*12,cy+sin(a)*12,cx+cos(a)*16,cy+sin(a)*16,ST77XX_YELLOW);}}else{tft.fillCircle(cx,cy,11,ST77XX_WHITE);tft.fillCircle(cx+5,cy-4,10,ST77XX_BLACK);}}else{tft.fillCircle(cx-8,cy+2,7,br);tft.fillCircle(cx+1,cy-4,10,br);tft.fillCircle(cx+11,cy+3,7,br);tft.fillRect(cx-14,cy+2,32,9,br);}}
 
-void desenharIconeOvoFrito(int cx,int cy){
-  uint16_t frig=tft.color565(45,45,45);
-  uint16_t calor=tft.color565(255,120,0);
-  // ondas de calor
-  tft.drawLine(cx-13,cy-22,cx-10,cy-26,calor);tft.drawLine(cx-10,cy-26,cx-7,cy-22,calor);
-  tft.drawLine(cx,cy-24,cx+3,cy-28,calor);tft.drawLine(cx+3,cy-28,cx+6,cy-24,calor);
-  tft.drawLine(cx+12,cy-22,cx+15,cy-26,calor);tft.drawLine(cx+15,cy-26,cx+18,cy-22,calor);
-  // frigideira e cabo
-  tft.fillRoundRect(cx-19,cy+3,38,11,4,frig);
-  tft.fillRect(cx+17,cy+7,14,4,frig);
-  tft.fillCircle(cx+31,cy+9,2,frig);
-  // clara irregular
-  tft.fillCircle(cx-8,cy+7,6,ST77XX_WHITE);
-  tft.fillCircle(cx,cy+6,7,ST77XX_WHITE);
-  tft.fillCircle(cx+8,cy+8,6,ST77XX_WHITE);
-  tft.fillRoundRect(cx-12,cy+5,24,8,4,ST77XX_WHITE);
-  // gema
-  tft.fillCircle(cx+1,cy+8,4,ST77XX_YELLOW);
+void desenharIconeCalorExtremo(int cx,int cy){
+  uint16_t pele=tft.color565(255,220,177);
+  uint16_t roupa=tft.color565(255,80,80);
+  uint16_t cont=tft.color565(240,240,240);
+  uint16_t boca=tft.color565(180,0,0);
+  uint16_t lingua=tft.color565(255,105,180);
+  uint16_t suor=tft.color565(80,220,255);
+  uint16_t calor=tft.color565(255,140,0);
+
+  tft.drawLine(cx-13,cy-24,cx-10,cy-28,calor);
+  tft.drawLine(cx-10,cy-28,cx-7,cy-24,calor);
+  tft.drawLine(cx+1,cy-26,cx+4,cy-30,calor);
+  tft.drawLine(cx+4,cy-30,cx+7,cy-26,calor);
+  tft.drawLine(cx+13,cy-24,cx+16,cy-28,calor);
+  tft.drawLine(cx+16,cy-28,cx+19,cy-24,calor);
+
+  tft.fillCircle(cx,cy-6,12,pele);
+
+  tft.drawLine(cx-7,cy-10,cx-3,cy-6,ST77XX_BLACK);
+  tft.drawLine(cx-7,cy-6,cx-3,cy-10,ST77XX_BLACK);
+  tft.drawLine(cx+3,cy-10,cx+7,cy-6,ST77XX_BLACK);
+  tft.drawLine(cx+3,cy-6,cx+7,cy-10,ST77XX_BLACK);
+
+  tft.fillRoundRect(cx-5,cy-2,10,6,2,boca);
+  tft.fillRoundRect(cx-2,cy+2,5,7,2,lingua);
+
+  tft.fillCircle(cx+12,cy-14,2,suor);
+  tft.drawPixel(cx+12,cy-17,suor);
+  tft.drawPixel(cx+11,cy-16,suor);
+  tft.drawPixel(cx+13,cy-16,suor);
+
+  tft.fillRoundRect(cx-5,cy+8,10,8,2,roupa);
+  tft.drawLine(cx-5,cy+10,cx-12,cy+16,cont);
+  tft.drawLine(cx+5,cy+10,cx+12,cy+16,cont);
+  tft.drawLine(cx-2,cy+16,cx-8,cy+28,cont);
+  tft.drawLine(cx+2,cy+16,cx+7,cy+28,cont);
+
+  tft.drawFastHLine(cx-14,cy+31,25,calor);
+  tft.drawPixel(cx-15,cy+30,calor);
+  tft.drawPixel(cx+11,cy+30,calor);
 }
 
 void mostrarClima(){
   telaLimpa();String nome=cidade+(uf.length()?" - "+uf:"");
-  bool fritando=!isnan(sensacao) && sensacao>35.0f;
+  bool derretendo=!isnan(sensacao) && sensacao>35.0f;
   if(retrato()){
     if(nome.length()>18)nome=nome.substring(0,18);texto(5,5,nome,ST77XX_CYAN);tft.drawFastHLine(0,18,W(),tft.color565(70,70,70));
-    if(fritando)desenharIconeOvoFrito(24,45);else desenharIconeClima(weatherCode,isDay,24,45);
+    if(derretendo)desenharIconeCalorExtremo(24,45);else desenharIconeClima(weatherCode,isDay,24,45);
     texto(50,28,isnan(temperatura)?"--C":String(temperatura,0)+"C",ST77XX_YELLOW,3);
-    texto(5,68,fritando?"Calor de fritar ovo!":descricaoTempo(weatherCode));
+    texto(5,68,derretendo?"Quase derretendo!":descricaoTempo(weatherCode));
     valorLinha(84,"Sensacao: ",sensacao,"C");valorLinha(99,"Umidade:  ",umidade,"%");valorLinha(114,"Vento:    ",vento," km/h");valorLinha(129,"Rajadas:  ",rajada," km/h");rodape(horaISO(weatherTime));
   }else{
     if(nome.length()>20)nome=nome.substring(0,20);texto(5,5,nome,ST77XX_CYAN);texto(126,5,"WiFi",ST77XX_GREEN);tft.drawFastHLine(0,17,W(),tft.color565(70,70,70));
-    if(fritando)desenharIconeOvoFrito(30,52);else desenharIconeClima(weatherCode,isDay,30,52);
+    if(derretendo)desenharIconeCalorExtremo(30,52);else desenharIconeClima(weatherCode,isDay,30,52);
     texto(67,31,isnan(temperatura)?"--C":String(temperatura,0)+"C",ST77XX_YELLOW,3);
-    texto(67,65,fritando?"Fritando!":descricaoTempo(weatherCode));tft.drawFastHLine(0,87,W(),tft.color565(70,70,70));
+    texto(67,65,derretendo?"Derretendo!":descricaoTempo(weatherCode));tft.drawFastHLine(0,87,W(),tft.color565(70,70,70));
     valorLinha(96,"Sens: ",sensacao,"C");valorLinha(108,"Umid: ",umidade,"%");tft.setCursor(92,96);tft.print("Vento:");tft.setCursor(92,108);tft.print(isnan(vento)?"--":String(vento,0)+" km/h");rodape(horaISO(weatherTime));
   }
 }
