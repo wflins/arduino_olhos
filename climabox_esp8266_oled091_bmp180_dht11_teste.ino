@@ -11,19 +11,19 @@
   OLED SSD1306 0,91"
     VCC -> 3V3
     GND -> GND
-    SCL -> D1 (GPIO5)
-    SDA -> D2 (GPIO4)
+    SCL -> D5 (GPIO14)
+    SDA -> D6 (GPIO12)
 
   BMP180
     VCC -> 3V3
     GND -> GND
-    SCL -> D1 (GPIO5)
-    SDA -> D2 (GPIO4)
+    SCL -> D5 (GPIO14)
+    SDA -> D6 (GPIO12)
 
   DHT11
     VCC  -> 3V3
     GND  -> GND
-    DATA -> D5 (GPIO14)
+    DATA -> D7 (GPIO13)
 
   Bibliotecas necessarias (Arduino IDE):
     - Adafruit GFX Library
@@ -48,9 +48,9 @@
 // -----------------------------
 // Pinagem
 // -----------------------------
-#define I2C_SDA D2   // GPIO4
-#define I2C_SCL D1   // GPIO5
-#define DHT_PIN D5   // GPIO14
+#define I2C_SDA D6   // GPIO12
+#define I2C_SCL D5   // GPIO14
+#define DHT_PIN D7   // GPIO13
 #define DHT_TYPE DHT11
 
 // -----------------------------
@@ -72,9 +72,6 @@ bool dhtOK = false;
 unsigned long ultimaLeitura = 0;
 const unsigned long INTERVALO_LEITURA = 2500;
 
-// --------------------------------------------------
-// Scanner I2C - mostra os dispositivos no Serial
-// --------------------------------------------------
 void scanI2C() {
   Serial.println();
   Serial.println(F("=== Scanner I2C ==="));
@@ -107,24 +104,6 @@ void scanI2C() {
 
   Serial.println(F("==================="));
   Serial.println();
-}
-
-void mostrarMensagem(const __FlashStringHelper* linha1,
-                     const __FlashStringHelper* linha2 = nullptr) {
-  if (!oledOK) return;
-
-  display.clearDisplay();
-  display.setTextColor(SSD1306_WHITE);
-  display.setTextSize(1);
-  display.setCursor(0, 4);
-  display.println(linha1);
-
-  if (linha2 != nullptr) {
-    display.setCursor(0, 18);
-    display.println(linha2);
-  }
-
-  display.display();
 }
 
 void mostrarStatusInicial() {
@@ -198,7 +177,6 @@ void mostrarLeiturasOLED(float tempDHT,
   display.setTextColor(SSD1306_WHITE);
   display.setTextSize(1);
 
-  // Linha 1: temperatura e umidade do DHT11
   display.setCursor(0, 0);
   display.print(F("DHT "));
   if (isnan(tempDHT)) {
@@ -215,7 +193,6 @@ void mostrarLeiturasOLED(float tempDHT,
     display.print(F("%"));
   }
 
-  // Linha 2: temperatura do BMP180
   display.setCursor(0, 11);
   display.print(F("BMP "));
   if (!bmpOK) {
@@ -225,7 +202,6 @@ void mostrarLeiturasOLED(float tempDHT,
     display.print(F("C"));
   }
 
-  // Linha 3: pressao
   display.setCursor(0, 22);
   display.print(F("P   "));
   if (!bmpOK) {
@@ -271,7 +247,6 @@ void setup() {
 
   scanI2C();
 
-  // OLED
   oledOK = display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS);
 
   Serial.print(F("OLED SSD1306: "));
@@ -288,14 +263,12 @@ void setup() {
     display.display();
   }
 
-  // BMP180
   bmpOK = bmp.begin();
   Serial.print(F("BMP180: "));
   Serial.println(bmpOK ? F("OK") : F("ERRO / nao encontrado"));
 
-  // DHT11
   dht.begin();
-  delay(2200); // DHT11 precisa de tempo entre leituras
+  delay(2200);
 
   float testeUmidade = dht.readHumidity();
   float testeTemperatura = dht.readTemperature();
