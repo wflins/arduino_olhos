@@ -1,35 +1,18 @@
 /*
-  ClimaBox - NodeMCU ESP8266 + OLED 0,91" + DHT11 + configuracao WiFi
+  ClimaBox - ESP8266 + OLED 0,91" + DHT11 + WiFi + API
 
-  Ligacoes:
-
-  OLED SSD1306 0,91" I2C (128x32)
+  OLED SSD1306 128x32 I2C
     VCC -> 3V3
     GND -> GND
     SCL/SCK -> D1 (GPIO5)
     SDA -> D2 (GPIO4)
 
   DHT11
-    VCC  -> 3V3
-    GND  -> GND
+    VCC -> 3V3
+    GND -> GND
     DATA -> D5 (GPIO14)
 
-  Bibliotecas necessarias:
-    - Adafruit GFX Library
-    - Adafruit SSD1306
-    - DHT sensor library by Adafruit
-    - Adafruit Unified Sensor
-
-  WiFi:
-    1. Ao iniciar, tenta conectar usando as credenciais salvas pelo ESP8266.
-    2. Se nao conectar em 15 segundos, cria um AP temporario:
-         ClimaBox-XXXX
-    3. Conecte-se ao AP e abra http://192.168.4.1
-       (ha tambem um captive portal via DNS).
-    4. Escolha/informe a rede e a senha.
-    5. O ESP salva as credenciais e reinicia.
-
-  Monitor Serial: 115200 baud
+  Bibliotecas adicionais: nenhuma alem das ja usadas.
 */
 
 #include <Wire.h>
@@ -39,20 +22,27 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <DNSServer.h>
+#include <ESP8266HTTPClient.h>
+#include <WiFiClientSecureBearSSL.h>
+#include <EEPROM.h>
 
 #define I2C_SDA D2
 #define I2C_SCL D1
-
 #define DHT_PIN D5
 #define DHT_TYPE DHT11
-
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 32
 #define OLED_RESET -1
 #define OLED_ADDRESS 0x3C
 
-#define TEMPO_CONEXAO_WIFI 15000UL
-#define INTERVALO_LEITURA 2500UL
+#define EEPROM_SIZE 64
+#define KEY_MAGIC 0x43
+#define FW_VERSION "0.4"
+
+const char* API_URL = "https://clima.lins.dev.br/api/measure.php";
+const unsigned long INTERVALO_LEITURA = 2500;
+const unsigned long INTERVALO_ENVIO = 300000; // 5 minutos
+const unsigned long WIFI_TIMEOUT = 15000;
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 DHT dht(DHT_PIN, DHT_TYPE);
@@ -60,308 +50,210 @@ ESP8266WebServer server(80);
 DNSServer dnsServer;
 
 bool oledOK = false;
-bool modoConfiguracao = false;
+bool modoConfig = false;
+bool dispositivoRegistrado = true;
+String deviceKey;
+String apName;
 unsigned long ultimaLeitura = 0;
-String apSSID;
+unsigned long ultimoEnvio = 0;
+float ultimaTemp = NAN;
+float ultimaUmid = NAN;
 
-void limparOLED() {
+void oled3(const String& a, const String& b = "", const String& c = "") {
   if (!oledOK) return;
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
   display.setTextSize(1);
-}
-
-void mostrarMensagem(const String &l1, const String &l2 = "", const String &l3 = "") {
-  if (!oledOK) return;
-
-  limparOLED();
-  display.setCursor(0, 0);
-  display.println(l1);
-  display.setCursor(0, 11);
-  display.println(l2);
-  display.setCursor(0, 22);
-  display.println(l3);
+  display.setCursor(0, 0); display.println(a);
+  display.setCursor(0, 11); display.println(b);
+  display.setCursor(0, 22); display.println(c);
   display.display();
 }
 
-String htmlEscape(String texto) {
-  texto.replace("&", "&amp;");
-  texto.replace("<", "&lt;");
-  texto.replace(">", "&gt;");
-  texto.replace("\"", "&quot;");
-  texto.replace("'", "&#39;");
-  return texto;
+String hex8(uint32_t v) {
+  char buf[9];
+  snprintf(buf, sizeof(buf), "%08X", v);
+  return String(buf);
 }
 
-String paginaConfiguracao(const String &mensagem = "") {
-  String html;
-  html.reserve(6000);
-
-  html += F("<!doctype html><html lang='pt-br'><head>");
-  html += F("<meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
-  html += F("<title>ClimaBox - WiFi</title><style>");
-  html += F("body{font-family:Arial,sans-serif;background:#f3f5f7;margin:0;padding:20px;color:#222}");
-  html += F(".box{max-width:460px;margin:20px auto;background:#fff;padding:22px;border-radius:16px;box-shadow:0 4px 18px #0002}");
-  html += F("h1{font-size:24px;margin:0 0 6px}.sub{color:#666;margin-bottom:20px}");
-  html += F("label{display:block;font-weight:bold;margin:14px 0 6px}select,input{box-sizing:border-box;width:100%;padding:12px;border:1px solid #bbb;border-radius:9px;font-size:16px}");
-  html += F("button{width:100%;margin-top:18px;padding:13px;border:0;border-radius:9px;background:#222;color:#fff;font-size:16px;font-weight:bold}");
-  html += F(".msg{background:#eef7ee;padding:10px;border-radius:8px;margin-bottom:15px}.small{font-size:13px;color:#777;margin-top:16px}");
-  html += F("</style></head><body><div class='box'><h1>ClimaBox</h1><div class='sub'>Configuracao de Wi-Fi</div>");
-
-  if (mensagem.length()) {
-    html += F("<div class='msg'>");
-    html += htmlEscape(mensagem);
-    html += F("</div>");
+void gerarOuCarregarChave() {
+  EEPROM.begin(EEPROM_SIZE);
+  if (EEPROM.read(0) == KEY_MAGIC) {
+    char buf[20];
+    for (int i = 0; i < 19; i++) buf[i] = char(EEPROM.read(i + 1));
+    buf[19] = 0;
+    deviceKey = String(buf);
+    if (!deviceKey.startsWith("CB-")) deviceKey = "";
   }
 
+  if (deviceKey.length() == 0) {
+    uint32_t a = ESP.getChipId() ^ ESP.getFlashChipId() ^ micros();
+    delay(5);
+    uint32_t b = ESP.getCycleCount() ^ micros() ^ (ESP.getChipId() << 7);
+    deviceKey = "CB-" + hex8(a) + "-" + hex8(b);
+
+    EEPROM.write(0, KEY_MAGIC);
+    for (int i = 0; i < 19; i++) EEPROM.write(i + 1, deviceKey[i]);
+    EEPROM.commit();
+  }
+
+  Serial.print(F("Chave do dispositivo: "));
+  Serial.println(deviceKey);
+}
+
+String htmlConfig() {
   int n = WiFi.scanNetworks();
-
-  html += F("<form method='POST' action='/salvar'>");
-  html += F("<label>Rede Wi-Fi</label><select name='ssid' required>");
-
-  if (n <= 0) {
-    html += F("<option value=''>Nenhuma rede encontrada</option>");
-  } else {
-    for (int i = 0; i < n; i++) {
-      String ssid = WiFi.SSID(i);
-      int rssi = WiFi.RSSI(i);
-      bool aberta = (WiFi.encryptionType(i) == ENC_TYPE_NONE);
-
-      html += F("<option value=\"");
-      html += htmlEscape(ssid);
-      html += F("\">");
-      html += htmlEscape(ssid);
-      html += F(" (");
-      html += String(rssi);
-      html += F(" dBm");
-      if (aberta) html += F(", aberta");
-      html += F(")</option>");
-    }
+  String h = "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>";
+  h += "<style>body{font-family:Arial;max-width:480px;margin:30px auto;padding:16px}input,select,button{width:100%;padding:12px;margin:7px 0;box-sizing:border-box}</style></head><body>";
+  h += "<h2>ClimaBox</h2><p>Configure a rede Wi-Fi.</p><form method='post' action='/save'><select name='ssid'>";
+  for (int i = 0; i < n; i++) {
+    h += "<option value='" + WiFi.SSID(i) + "'>" + WiFi.SSID(i) + " (" + String(WiFi.RSSI(i)) + " dBm)</option>";
   }
-
-  html += F("</select>");
-  html += F("<label>Ou digite o SSID</label><input name='ssid_manual' maxlength='32' placeholder='Opcional'>");
-  html += F("<label>Senha</label><input name='senha' type='password' maxlength='64' placeholder='Senha da rede'>");
-  html += F("<button type='submit'>Salvar e conectar</button></form>");
-  html += F("<div class='small'>Se a pagina nao abrir automaticamente, acesse <b>192.168.4.1</b>.</div>");
-  html += F("</div></body></html>");
-
-  WiFi.scanDelete();
-  return html;
+  h += "</select><input name='pass' type='password' placeholder='Senha'><button>Salvar e conectar</button></form>";
+  h += "<hr><small>Dispositivo: " + deviceKey + "</small></body></html>";
+  return h;
 }
 
-void responderPortal() {
-  server.send(200, "text/html; charset=utf-8", paginaConfiguracao());
-}
-
-void salvarWiFi() {
-  String ssid = server.arg("ssid_manual");
-  ssid.trim();
-  if (!ssid.length()) {
-    ssid = server.arg("ssid");
-  }
-
-  String senha = server.arg("senha");
-
-  if (!ssid.length()) {
-    server.send(400, "text/html; charset=utf-8", paginaConfiguracao("Informe uma rede Wi-Fi."));
-    return;
-  }
-
-  Serial.print(F("Nova rede informada: "));
-  Serial.println(ssid);
-
-  // O core ESP8266 grava as credenciais na flash quando persistent(true).
-  WiFi.persistent(true);
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid.c_str(), senha.c_str());
-
-  mostrarMensagem("WiFi configurado", ssid, "Reiniciando...");
-
-  String html = F("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'></head><body style='font-family:Arial;padding:30px'><h2>ClimaBox</h2><p>Wi-Fi salvo.</p><p>O dispositivo sera reiniciado e tentara conectar a <b>");
-  html += htmlEscape(ssid);
-  html += F("</b>.</p></body></html>");
-
-  server.send(200, "text/html; charset=utf-8", html);
-  delay(1500);
-  ESP.restart();
-}
-
-void iniciarModoConfiguracao() {
-  modoConfiguracao = true;
-
-  WiFi.disconnect();
-  delay(100);
+void iniciarPortal() {
+  modoConfig = true;
   WiFi.mode(WIFI_AP_STA);
+  apName = "ClimaBox-" + hex8(ESP.getChipId()).substring(4);
+  WiFi.softAP(apName.c_str());
+  IPAddress ip = WiFi.softAPIP();
+  dnsServer.start(53, "*", ip);
 
-  uint32_t chipId = ESP.getChipId();
-  char sufixo[5];
-  snprintf(sufixo, sizeof(sufixo), "%04X", (unsigned int)(chipId & 0xFFFF));
-  apSSID = "ClimaBox-" + String(sufixo);
-
-  IPAddress apIP(192, 168, 4, 1);
-  IPAddress netmask(255, 255, 255, 0);
-  WiFi.softAPConfig(apIP, apIP, netmask);
-  WiFi.softAP(apSSID.c_str());
-
-  dnsServer.start(53, "*", apIP);
-
-  server.on("/", HTTP_GET, responderPortal);
-  server.on("/salvar", HTTP_POST, salvarWiFi);
-
-  // Endpoints comuns usados por Android/iOS/Windows para detectar captive portal.
-  server.on("/generate_204", HTTP_ANY, responderPortal);
-  server.on("/gen_204", HTTP_ANY, responderPortal);
-  server.on("/hotspot-detect.html", HTTP_ANY, responderPortal);
-  server.on("/connecttest.txt", HTTP_ANY, responderPortal);
-  server.on("/ncsi.txt", HTTP_ANY, responderPortal);
-  server.onNotFound(responderPortal);
+  server.on("/", [](){ server.send(200, "text/html", htmlConfig()); });
+  server.on("/generate_204", [](){ server.sendHeader("Location", "/", true); server.send(302, "text/plain", ""); });
+  server.on("/hotspot-detect.html", [](){ server.sendHeader("Location", "/", true); server.send(302, "text/plain", ""); });
+  server.on("/save", HTTP_POST, [](){
+    String ssid = server.arg("ssid");
+    String pass = server.arg("pass");
+    if (ssid.length() == 0) { server.send(400, "text/plain", "SSID obrigatorio"); return; }
+    server.send(200, "text/html", "<h2>ClimaBox</h2><p>Rede salva. Reiniciando...</p>");
+    delay(500);
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid.c_str(), pass.c_str());
+    delay(1000);
+    ESP.restart();
+  });
+  server.onNotFound([](){ server.sendHeader("Location", "/", true); server.send(302, "text/plain", ""); });
   server.begin();
 
-  Serial.println();
-  Serial.println(F("=== MODO CONFIGURACAO WIFI ==="));
-  Serial.print(F("Rede temporaria: "));
-  Serial.println(apSSID);
-  Serial.println(F("Acesse: http://192.168.4.1"));
-  Serial.println(F("==============================="));
-
-  mostrarMensagem("Configurar WiFi", apSSID, "192.168.4.1");
+  oled3("Configurar WiFi", apName, "192.168.4.1");
+  Serial.println("AP: " + apName);
+  Serial.println(F("Abra: http://192.168.4.1"));
 }
 
-bool conectarWiFiSalvo() {
-  WiFi.persistent(true);
+bool conectarWifi() {
   WiFi.mode(WIFI_STA);
-  WiFi.setAutoReconnect(true);
   WiFi.begin();
-
-  Serial.print(F("Tentando WiFi salvo"));
-  mostrarMensagem("ClimaBox", "Conectando WiFi...", "");
-
+  oled3("ClimaBox", "Conectando WiFi...", "");
   unsigned long inicio = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - inicio < TEMPO_CONEXAO_WIFI) {
-    Serial.print('.');
-    delay(400);
+  while (WiFi.status() != WL_CONNECTED && millis() - inicio < WIFI_TIMEOUT) {
+    delay(300);
     yield();
   }
-  Serial.println();
-
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println(F("WiFi conectado."));
-    Serial.print(F("SSID: "));
-    Serial.println(WiFi.SSID());
-    Serial.print(F("IP: "));
-    Serial.println(WiFi.localIP());
-
-    mostrarMensagem("WiFi conectado", WiFi.SSID(), WiFi.localIP().toString());
-    delay(1800);
+    Serial.print(F("WiFi OK: ")); Serial.println(WiFi.SSID());
+    Serial.print(F("IP: ")); Serial.println(WiFi.localIP());
+    oled3("WiFi conectado", WiFi.SSID(), WiFi.localIP().toString());
+    delay(1500);
     return true;
   }
-
-  Serial.println(F("Nao foi possivel conectar ao WiFi salvo."));
   return false;
 }
 
-void mostrarErroDHT() {
-  mostrarMensagem("ClimaBox", "Erro no DHT11", WiFi.status() == WL_CONNECTED ? "WiFi OK" : "WiFi offline");
-}
-
-void mostrarLeitura(float temperatura, float umidade) {
-  if (!oledOK) return;
-
-  limparOLED();
-
-  // Cabecalho + indicador simples de WiFi.
-  display.setCursor(0, 0);
-  display.print(F("ClimaBox"));
-  display.setCursor(112, 0);
-  display.print(WiFi.status() == WL_CONNECTED ? F("Wi") : F("--"));
-
-  display.setCursor(0, 12);
-  display.print(F("Temp: "));
-  display.print(temperatura, 1);
-  display.print(F(" C"));
-
-  display.setCursor(0, 23);
-  display.print(F("Umid: "));
-  display.print(umidade, 0);
-  display.print(F(" %"));
-
-  display.display();
-}
-
-void lerDHT11() {
-  float umidade = dht.readHumidity();
-  float temperatura = dht.readTemperature();
-
-  Serial.println(F("--------------------------------"));
-  Serial.println(F("ClimaBox - leitura local"));
-
-  if (isnan(temperatura) || isnan(umidade)) {
-    Serial.println(F("DHT11: ERRO na leitura"));
-    mostrarErroDHT();
-  } else {
-    Serial.print(F("Temperatura: "));
-    Serial.print(temperatura, 1);
-    Serial.println(F(" C"));
-
-    Serial.print(F("Umidade: "));
-    Serial.print(umidade, 0);
-    Serial.println(F(" %"));
-
-    Serial.print(F("WiFi: "));
-    Serial.println(WiFi.status() == WL_CONNECTED ? WiFi.SSID() : F("offline"));
-
-    mostrarLeitura(temperatura, umidade);
+void mostrarLeitura() {
+  if (isnan(ultimaTemp) || isnan(ultimaUmid)) {
+    oled3("ClimaBox", "Erro no DHT11", "");
+    return;
   }
+  String status = WiFi.status() == WL_CONNECTED ? "WiFi OK" : "Sem WiFi";
+  if (!dispositivoRegistrado) status = "CADASTRAR CHAVE";
+  oled3("T " + String(ultimaTemp,1) + "C  U " + String(ultimaUmid,0) + "%", status, dispositivoRegistrado ? "" : deviceKey.substring(0,19));
+}
 
-  Serial.println(F("--------------------------------"));
-  Serial.println();
+void lerDHT() {
+  ultimaUmid = dht.readHumidity();
+  ultimaTemp = dht.readTemperature();
+  if (isnan(ultimaTemp) || isnan(ultimaUmid)) {
+    Serial.println(F("DHT11: erro"));
+  } else {
+    Serial.printf("Temperatura: %.1f C | Umidade: %.0f %%\n", ultimaTemp, ultimaUmid);
+  }
+  mostrarLeitura();
+}
+
+void enviarMedicao() {
+  if (WiFi.status() != WL_CONNECTED || isnan(ultimaTemp) || isnan(ultimaUmid)) return;
+
+  std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
+  // Prototipo: HTTPS criptografado, mas sem validacao do certificado.
+  // Na versao final devemos fixar CA/certificado.
+  client->setInsecure();
+
+  HTTPClient https;
+  if (!https.begin(*client, API_URL)) return;
+  https.addHeader("Content-Type", "application/json");
+
+  String json = "{\"key\":\"" + deviceKey + "\",\"temperature\":" + String(ultimaTemp,1) +
+                ",\"humidity\":" + String(ultimaUmid,0) + ",\"rssi\":" + String(WiFi.RSSI()) +
+                ",\"firmware\":\"" FW_VERSION "\"}";
+
+  int code = https.POST(json);
+  String resposta = https.getString();
+  Serial.printf("API HTTP %d: %s\n", code, resposta.c_str());
+
+  dispositivoRegistrado = (code != 403);
+  if (code == 403) {
+    oled3("Cadastre no site", deviceKey.substring(0,11), deviceKey.substring(11));
+    delay(5000);
+  }
+  https.end();
 }
 
 void setup() {
   Serial.begin(115200);
-  delay(500);
-
-  Serial.println();
-  Serial.println(F("================================"));
-  Serial.println(F(" ClimaBox - OLED + DHT11 + WiFi"));
-  Serial.println(F("================================"));
-
+  delay(300);
   Wire.begin(I2C_SDA, I2C_SCL);
-
   oledOK = display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS);
-
-  if (!oledOK) {
-    Serial.println(F("OLED: ERRO / nao encontrado em 0x3C"));
-  } else {
-    Serial.println(F("OLED: OK (0x3C)"));
-    mostrarMensagem("ClimaBox", "Iniciando...", "");
-  }
-
   dht.begin();
-  delay(2200);
 
-  if (!conectarWiFiSalvo()) {
-    iniciarModoConfiguracao();
-  } else {
-    lerDHT11();
-    ultimaLeitura = millis();
+  gerarOuCarregarChave();
+  if (oledOK) {
+    oled3("ClimaBox " FW_VERSION, "Chave:", deviceKey.substring(0,19));
+    delay(1800);
   }
+
+  if (!conectarWifi()) {
+    iniciarPortal();
+    return;
+  }
+
+  delay(2200);
+  lerDHT();
+  enviarMedicao();
+  ultimaLeitura = millis();
+  ultimoEnvio = millis();
 }
 
 void loop() {
-  if (modoConfiguracao) {
+  if (modoConfig) {
     dnsServer.processNextRequest();
     server.handleClient();
     yield();
     return;
   }
 
-  // Se perder WiFi durante o uso, o ESP8266 tenta reconectar automaticamente.
   if (millis() - ultimaLeitura >= INTERVALO_LEITURA) {
     ultimaLeitura = millis();
-    lerDHT11();
+    lerDHT();
   }
 
+  if (millis() - ultimoEnvio >= INTERVALO_ENVIO) {
+    ultimoEnvio = millis();
+    if (WiFi.status() != WL_CONNECTED) conectarWifi();
+    enviarMedicao();
+  }
   yield();
 }
